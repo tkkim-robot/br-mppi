@@ -1,0 +1,33 @@
+__pycache__/
+*/__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.DS_Store
+
+.venv/
+.env
+.env.*
+
+output/
+outputs/
+Videos/
+*.mp4
+*.gif
+*.png
+
+# Local/editor state
+.idea/
+.vscode/
+
+# Legacy mobile_arm generated/runtime artifacts. The folder itself is kept as
+# a git submodule; these paths document what should stay out of local work.
+mobile_arm/colcon_ws/
+mobile_arm/Dockerfiles/
+mobile_arm/.devcontainer/
+mobile_arm/notebooks/.ipynb_checkpoints/
+mobile_arm/paper_codes/
+mobile_arm/gpu.Dockerfile
+mobile_arm/docker-compose.yaml

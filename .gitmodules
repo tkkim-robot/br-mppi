@@ -1,0 +1,3 @@
+[submodule "mobile_arm"]
+	path = mobile_arm
+	url = https://github.com/hardikparwana/mobile_arm.git
