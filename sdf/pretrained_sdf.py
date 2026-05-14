@@ -53,7 +53,7 @@ class PretrainedShapeSDF:
     def description(self) -> str:
         return (
             f"{self.spec.model_file} ({self.spec.shape_name}, "
-            f"mobile_arm/sdf_utils/arm_2d_config.py index {self.spec.source_shape_index})"
+            f"source shape index {self.spec.source_shape_index})"
         )
 
     def signed_distance(self, points: np.ndarray) -> np.ndarray:
@@ -127,8 +127,6 @@ def load_pretrained_sdf_for_robot(robot_name: str, *, repo_root: Path | None = N
     root = repo_root or Path(__file__).resolve().parents[1]
     spec = SUPPORTED_PRETRAINED_SDFS[robot_name]
     model_path = root / "sdf" / "trained_models" / spec.model_file
-    if not model_path.exists():
-        model_path = root / "mobile_arm" / "sdf_utils" / "trained_models" / spec.model_file
     if not model_path.exists():
         raise PretrainedSDFUnavailable(f"missing pretrained model file: {model_path}")
     params = np.load(model_path, allow_pickle=True).item()

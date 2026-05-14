@@ -1,7 +1,7 @@
 [project]
 name = "br-mppi"
 version = "0.1.0"
-description = "Barrier-rate guided MPPI examples ported from the mobile_arm experiments."
+description = "Barrier-rate guided MPPI obstacle-avoidance examples."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

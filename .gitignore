@@ -18,16 +18,10 @@ Videos/
 *.gif
 *.png
 
+# Upstream reference checkout is intentionally local-only. This repo vendors
+# the small pretrained SDF checkpoints it needs under sdf/trained_models/.
+mobile_arm/
+
 # Local/editor state
 .idea/
 .vscode/
-
-# Legacy mobile_arm generated/runtime artifacts. The folder itself is kept as
-# a git submodule; these paths document what should stay out of local work.
-mobile_arm/colcon_ws/
-mobile_arm/Dockerfiles/
-mobile_arm/.devcontainer/
-mobile_arm/notebooks/.ipynb_checkpoints/
-mobile_arm/paper_codes/
-mobile_arm/gpu.Dockerfile
-mobile_arm/docker-compose.yaml

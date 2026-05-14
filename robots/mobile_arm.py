@@ -7,7 +7,7 @@ from robots.base_robot import RobotModel, wrap_angle
 
 
 class MobileArmRobot(RobotModel):
-    """Planar mobile base with two fixed 4-link arms from the original mobile_arm scripts."""
+    """Planar mobile base with two fixed 4-link arms."""
 
     def __init__(self) -> None:
         super().__init__(
