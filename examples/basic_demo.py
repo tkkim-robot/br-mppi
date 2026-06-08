@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import shutil
 import sys
 
 import matplotlib
@@ -25,16 +26,35 @@ ROBOT_SHORTHANDS = {
     "mobile_arm": "mobile_arm",
 }
 
+DEMO_DEFAULTS = {
+    "single_integrator": {"steps": 120, "horizon": 20, "samples": 80, "plot_samples": 80},
+    "unicycle": {"steps": 120, "horizon": 36, "samples": 80, "plot_samples": 80},
+    "dynamic_unicycle": {"steps": 120, "horizon": 36, "samples": 80, "plot_samples": 80},
+    "planar_quadrotor": {"steps": 120, "horizon": 36, "samples": 80, "plot_samples": 80},
+    "mobile_arm": {"steps": 80, "horizon": 28, "samples": 96, "plot_samples": 96},
+}
+
+NSDF_DEFAULTS = {
+    "unicycle": {"steps": 80, "horizon": 28, "samples": 56, "plot_samples": 56},
+    "dynamic_unicycle": {"steps": 80, "horizon": 28, "samples": 56, "plot_samples": 56},
+    "planar_quadrotor": {"steps": 80, "horizon": 28, "samples": 56, "plot_samples": 56},
+}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a BR-MPPI obstacle-avoidance demo.")
     parser.add_argument("--algo", choices=ALGORITHMS, default="brmppi")
     parser.add_argument("--robot", choices=tuple(sorted(ROBOT_REGISTRY)), default="unicycle")
     parser.add_argument("--nsdf", action="store_true", help="Use the pretrained neural signed distance model for h.")
-    parser.add_argument("--steps", type=int, default=220)
-    parser.add_argument("--horizon", type=int, default=20)
-    parser.add_argument("--samples", type=int, default=128)
-    parser.add_argument("--plot-samples", type=int, default=100, help="Number of sampled MPPI trajectories to draw.")
+    parser.add_argument("--steps", type=int, default=None, help="Simulation steps. Defaults depend on robot and --nsdf.")
+    parser.add_argument("--horizon", type=int, default=None, help="MPPI rollout horizon. Defaults depend on robot and --nsdf.")
+    parser.add_argument("--samples", type=int, default=None, help="Number of MPPI samples. Defaults depend on robot and --nsdf.")
+    parser.add_argument(
+        "--plot-samples",
+        type=int,
+        default=None,
+        help="Number of sampled MPPI trajectories to draw. Defaults depend on robot and --nsdf.",
+    )
     parser.add_argument("--dt", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--headless", action="store_true", help="Run without opening a Matplotlib window.")
@@ -48,7 +68,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fps", type=int, default=12, help="Animation frames per second.")
     parser.add_argument("--animation-stride", type=int, default=2, help="Save every Nth rollout frame.")
     parser.add_argument("--collision-hold-seconds", type=float, default=3.0, help="Seconds to hold collision frame.")
-    return parser.parse_args()
+    args = parser.parse_args()
+    apply_demo_defaults(args)
+    return args
+
+
+def apply_demo_defaults(args: argparse.Namespace) -> None:
+    defaults = dict(DEMO_DEFAULTS[args.robot])
+    if args.nsdf:
+        defaults.update(NSDF_DEFAULTS.get(args.robot, {}))
+    for key, value in defaults.items():
+        if getattr(args, key) is None:
+            setattr(args, key, value)
 
 
 def main() -> None:
@@ -75,13 +106,30 @@ def main() -> None:
     sampled_rollouts = [np.empty((0, args.horizon + 1, robot.state_dim), dtype=float)]
     best_rollouts = [np.empty((0, robot.state_dim), dtype=float)]
     min_exact_clearance = exact_clearance(field, robot, state)
+    min_sampled_rollout_clearance = np.inf
+    min_best_rollout_clearance = np.inf
+    max_sampled_collision_fraction = 0.0
+    first_sample_collision_step: int | None = None
+    first_best_collision_step: int | None = None
     reached = False
     collision_index = 0 if min_exact_clearance < 0.0 else None
 
-    for _ in range(args.steps):
+    for step_idx in range(args.steps):
         action, diagnostics = controller.command(state, goal)
         sampled_rollouts.append(diagnostics["sampled_trajectories"])
         best_rollouts.append(diagnostics["best_trajectory"])
+        sampled_min = float(diagnostics["sampled_min_clearance"])
+        best_min = float(diagnostics["best_min_clearance"])
+        min_sampled_rollout_clearance = min(min_sampled_rollout_clearance, sampled_min)
+        min_best_rollout_clearance = min(min_best_rollout_clearance, best_min)
+        max_sampled_collision_fraction = max(
+            max_sampled_collision_fraction,
+            float(diagnostics["sampled_collision_fraction"]),
+        )
+        if first_sample_collision_step is None and int(diagnostics["sampled_collision_count"]) > 0:
+            first_sample_collision_step = step_idx
+        if first_best_collision_step is None and bool(diagnostics["best_collision"]):
+            first_best_collision_step = step_idx
         state = robot.step(state, action, args.dt)
         trajectory.append(state.copy())
         current_clearance = exact_clearance(field, robot, state)
@@ -120,9 +168,19 @@ def main() -> None:
     elif should_show_animation:
         show_animation(field, robot, trajectory_arr, sampled_rollouts, best_rollouts, goal, args, bounds, collision_index)
 
-    print(f"algo={args.algo} robot={args.robot} nsdf={args.nsdf}")
+    print(f"algo={args.algo} robot={args.robot} nsdf={args.nsdf} barrier_source={controller.barrier_source}")
     print(f"reached={reached} collision={collision} steps={len(trajectory_arr) - 1}")
     print(f"final_error={final_error:.3f} min_exact_clearance={min_exact_clearance:.3f}")
+    print(
+        "sampled_min_clearance="
+        f"{min_sampled_rollout_clearance:.3f} best_rollout_min_clearance={min_best_rollout_clearance:.3f}"
+    )
+    print(
+        "first_sample_collision_step="
+        f"{format_optional_step(first_sample_collision_step)} "
+        f"first_best_collision_step={format_optional_step(first_best_collision_step)} "
+        f"max_sampled_collision_fraction={max_sampled_collision_fraction:.3f}"
+    )
     print(f"plot={output_path}")
     if animation_path is not None:
         print(f"animation={animation_path}")
@@ -130,6 +188,10 @@ def main() -> None:
 
 def exact_clearance(field, robot, state: np.ndarray) -> float:
     return float(np.min(field.signed_distance(robot.body_points(state))) - robot.body_point_radius)
+
+
+def format_optional_step(step: int | None) -> str:
+    return "none" if step is None else str(step)
 
 
 def collision_point(field, robot, state: np.ndarray) -> np.ndarray:
@@ -204,10 +266,14 @@ def save_animation(
     collision_index: int | None,
 ) -> None:
     import matplotlib.pyplot as plt
+    import matplotlib as mpl
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots(figsize=(8, 5.4))
     ax.set_axisbelow(True)
+    ffmpeg_path = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
+    if Path(ffmpeg_path).exists():
+        mpl.rcParams["animation.ffmpeg_path"] = ffmpeg_path
     writer = FFMpegWriter(fps=args.fps, metadata={"title": "BR-MPPI rollout", "artist": "br-mppi"})
     stride = max(1, args.animation_stride)
     frame_indices = list(range(0, len(trajectory), stride))
