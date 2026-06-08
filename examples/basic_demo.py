@@ -28,8 +28,8 @@ ROBOT_SHORTHANDS = {
 
 DEMO_DEFAULTS = {
     "single_integrator": {"steps": 120, "horizon": 20, "samples": 80, "plot_samples": 80},
-    "unicycle": {"steps": 120, "horizon": 36, "samples": 80, "plot_samples": 80},
-    "dynamic_unicycle": {"steps": 120, "horizon": 36, "samples": 80, "plot_samples": 80},
+    "unicycle": {"steps": 240, "horizon": 36, "samples": 80, "plot_samples": 80},
+    "dynamic_unicycle": {"steps": 120, "horizon": 20, "samples": 80, "plot_samples": 80},
     "planar_quadrotor": {"steps": 120, "horizon": 36, "samples": 80, "plot_samples": 80},
     "mobile_arm": {"steps": 80, "horizon": 28, "samples": 96, "plot_samples": 96},
 }
@@ -103,8 +103,8 @@ def main() -> None:
     state = robot.default_state.copy()
     goal = robot.default_goal.copy()
     trajectory = [state.copy()]
-    sampled_rollouts = [np.empty((0, args.horizon + 1, robot.state_dim), dtype=float)]
-    best_rollouts = [np.empty((0, robot.state_dim), dtype=float)]
+    sampled_rollouts = []
+    best_rollouts = []
     min_exact_clearance = exact_clearance(field, robot, state)
     min_sampled_rollout_clearance = np.inf
     min_best_rollout_clearance = np.inf
@@ -220,7 +220,8 @@ def plot_demo(
     fig, ax = plt.subplots(figsize=(8, 5.4))
     ax.set_axisbelow(True)
     field.draw(ax)
-    draw_sampled_rollouts(ax, robot, sampled_rollouts[-1], best_rollouts[-1])
+    sampled, best = rollouts_for_frame(sampled_rollouts, best_rollouts, len(trajectory) - 1)
+    draw_sampled_rollouts(ax, robot, sampled, best)
     positions = np.array([robot.position(s) for s in trajectory])
     ax.plot(positions[:, 0], positions[:, 1], color="tab:blue", linewidth=2.2, label="trajectory")
     ax.scatter([positions[0, 0]], [positions[0, 1]], color="tab:green", s=90, label="start", zorder=4)
@@ -339,7 +340,8 @@ def draw_frame(
     ax.clear()
     ax.set_axisbelow(True)
     field.draw(ax)
-    draw_sampled_rollouts(ax, robot, sampled_rollouts[frame_idx], best_rollouts[frame_idx])
+    sampled, best = rollouts_for_frame(sampled_rollouts, best_rollouts, frame_idx)
+    draw_sampled_rollouts(ax, robot, sampled, best)
     positions = np.array([robot.position(s) for s in trajectory[: frame_idx + 1]])
     ax.plot(positions[:, 0], positions[:, 1], color="tab:blue", linewidth=2.2, label="trajectory")
     ax.scatter([positions[0, 0]], [positions[0, 1]], color="tab:green", s=90, label="start", zorder=4)
@@ -361,6 +363,17 @@ def draw_sampled_rollouts(ax, robot, sampled_rollouts: np.ndarray, best_rollout:
     if best_rollout.size:
         positions = np.array([robot.position(state) for state in best_rollout])
         ax.plot(positions[:, 0], positions[:, 1], color="tab:blue", linestyle="--", linewidth=1.2, alpha=0.65)
+
+
+def rollouts_for_frame(
+    sampled_rollouts: list[np.ndarray],
+    best_rollouts: list[np.ndarray],
+    frame_idx: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    if not sampled_rollouts:
+        return np.array([]), np.array([])
+    rollout_idx = min(frame_idx, len(sampled_rollouts) - 1)
+    return sampled_rollouts[rollout_idx], best_rollouts[rollout_idx]
 
 
 def draw_collision_marker(ax, field, robot, state: np.ndarray, bounds: tuple[float, float, float, float]) -> None:

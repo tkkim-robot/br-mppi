@@ -36,7 +36,7 @@ class MPPIConfig:
     alpha_rate_bound: float = 10.0
     alpha_state_bound: float = 2.0
     alpha_noise_scale: float = 0.65
-    alpha_projection_inverse_weight: float = 10.0
+    alpha_projection_inverse_weight: float = 0.1
     bound_penalty: float = 0.0
     barrier_buffer_distance: float = 0.2
     barrier_projection_margin: float = 0.12

@@ -10,49 +10,42 @@ class DynamicUnicycleRobot(RobotModel):
     def __init__(self) -> None:
         super().__init__(
             name="dynamic_unicycle",
-            state_dim=5,
+            state_dim=4,
             control_dim=2,
-            control_bounds=np.array([[-1.4, 1.4], [-3.0, 3.0]], dtype=float),
+            control_bounds=np.array([[-3.0, 3.0], [-3.0, 3.0]], dtype=float),
             radius=0.54,
             body_point_radius=0.08,
-            default_state=np.array([-7.0, -3.6, -0.75, 0.0, 0.0], dtype=float),
+            default_state=np.array([-7.0, -3.6, -0.75, 0.0], dtype=float),
             default_goal=np.array([7.0, 3.6], dtype=float),
             goal_tolerance=0.5,
         )
         self.length = 1.0
         self.width = 0.4
-        self.speed_bounds = np.array([-0.35, 1.55], dtype=float)
-        self.omega_bounds = np.array([-2.4, 2.4], dtype=float)
 
     def step(self, state: np.ndarray, control: np.ndarray, dt: float) -> np.ndarray:
-        accel, angular_accel = self.clip_control(control)
-        x, y, theta, v, omega = state
-        v_next = float(np.clip(v + accel * dt, self.speed_bounds[0], self.speed_bounds[1]))
-        omega_next = float(np.clip(omega + angular_accel * dt, self.omega_bounds[0], self.omega_bounds[1]))
-        theta_next = wrap_angle(theta + omega_next * dt)
+        accel, omega = self.clip_control(control)
+        x, y, theta, v = state
         return np.array(
             [
-                x + v_next * np.cos(theta_next) * dt,
-                y + v_next * np.sin(theta_next) * dt,
-                theta_next,
-                v_next,
-                omega_next,
+                x + v * np.cos(theta) * dt,
+                y + v * np.sin(theta) * dt,
+                wrap_angle(theta + omega * dt),
+                v + accel * dt,
             ],
             dtype=float,
         )
 
     def drift(self, state: np.ndarray) -> np.ndarray:
-        _, _, theta, v, omega = state
-        return np.array([v * np.cos(theta), v * np.sin(theta), omega, 0.0, 0.0], dtype=float)
+        _, _, theta, v = state
+        return np.array([v * np.cos(theta), v * np.sin(theta), 0.0, 0.0], dtype=float)
 
     def control_matrix(self, state: np.ndarray) -> np.ndarray:
         return np.array(
             [
                 [0.0, 0.0],
                 [0.0, 0.0],
-                [0.0, 0.0],
-                [1.0, 0.0],
                 [0.0, 1.0],
+                [1.0, 0.0],
             ],
             dtype=float,
         )
@@ -60,10 +53,9 @@ class DynamicUnicycleRobot(RobotModel):
     def projection_barrier_state(self, state: np.ndarray, dt: float) -> np.ndarray:
         lookahead = 5.0 * dt
         projected = state.copy()
-        theta, v, omega = state[2], state[3], state[4]
+        theta, v = state[2], state[3]
         projected[0] += v * np.cos(theta) * lookahead
         projected[1] += v * np.sin(theta) * lookahead
-        projected[2] = wrap_angle(theta + omega * lookahead)
         return projected
 
     def nominal_control(self, state: np.ndarray, goal: np.ndarray) -> np.ndarray:
@@ -72,10 +64,9 @@ class DynamicUnicycleRobot(RobotModel):
         heading_error = wrap_angle(desired - state[2])
         distance = np.linalg.norm(delta)
         desired_v = np.clip(0.75 * distance * max(0.1, np.cos(heading_error)), 0.0, 1.25)
-        desired_omega = np.clip(2.2 * heading_error, -2.0, 2.0)
         accel = 1.8 * (desired_v - state[3])
-        angular_accel = 2.0 * (desired_omega - state[4])
-        return self.clip_control(np.array([accel, angular_accel], dtype=float))
+        omega = 2.2 * heading_error
+        return self.clip_control(np.array([accel, omega], dtype=float))
 
     def body_points(self, state: np.ndarray) -> np.ndarray:
         x, y, theta = state[:3]

@@ -99,7 +99,7 @@ uv run python examples/sanity_check.py --include-nsdf
 
 This prints executed, sampled-rollout, and best-rollout clearance metrics for the analytic and neural-SDF barrier paths. Use it as the quick baseline when changing BR-MPPI cost terms.
 
-The demo uses robot-specific default horizons so the BR-MPPI sample cloud visibly branches around obstacles. The single-integrator case uses a 20-step rollout horizon, while unicycle, dynamic-unicycle, and planar-quadrotor cases use 36-step rollout horizons by default. The mobile-arm default uses a 28-step horizon because its sampled footprint is much heavier to evaluate. Neural-SDF runs use 28-step horizons for the supported robots. You can still override these with `--horizon`, `--samples`, `--steps`, and `--plot-samples`.
+The demo uses robot-specific default horizons so the BR-MPPI sample cloud visibly branches around obstacles. The single-integrator and dynamic-unicycle cases use 20-step rollout horizons, while unicycle and planar-quadrotor cases use 36-step rollout horizons by default. The mobile-arm default uses a 28-step horizon because its sampled footprint is much heavier to evaluate. Neural-SDF runs use 28-step horizons for the supported robots. You can still override these with `--horizon`, `--samples`, `--steps`, and `--plot-samples`.
 
 The default scene uses a larger random-looking circular obstacle field inspired by the BR-MPPI paper's branching-rollout illustration. A straight-line path from start to goal intersects obstacles for every robot, and the useful trajectories snake through clutter with obstacles on both sides instead of bypassing the field along open edges. The mobile-arm demo uses an even larger workspace with its own obstacle field because its fixed footprint is much larger. The green transparent lines are the MPPI sample cloud and the dashed blue line is the best sampled rollout at the current step.
 
@@ -109,7 +109,7 @@ Each run prints three safety diagnostics: executed trajectory clearance, minimum
 
 If a rollout collides, the simulation stops at the first collision. Plots and videos draw a bold red `!` at the closest colliding body sample, and MP4 output holds that final collision frame briefly before ending.
 
-The `mobile_arm` demo model uses a `1.5 x 1.0` planar base, two arm mounts at `[-0.5, 0]` and `[0.5, 0]`, fixed 4-link arms with link lengths `[0.8, 0.6, 0.4, 0.2]`, and a folded two-arm posture. The controller currently plans the mobile base motion while the base and fixed arm links are included in collision checking and visualization.
+The `mobile_arm` demo model uses a `1.5 x 1.0` planar base, two arm mounts at `[-0.5, 0]` and `[0.5, 0]`, two 4-link arms with link lengths `[0.8, 0.6, 0.4, 0.2]`, and a folded two-arm posture. The controller plans the two base controls plus eight joint velocity controls, while dense base and link edge samples are included in collision checking and visualization.
 
 ## SDF Notes
 

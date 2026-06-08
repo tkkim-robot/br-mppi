@@ -32,8 +32,8 @@ class PlanarQuadrotorRobot(RobotModel):
         vy_next = float(np.clip(vy + ay_cmd * dt, -self.velocity_limit, self.velocity_limit))
         return np.array(
             [
-                x + vx_next * dt,
-                y + vy_next * dt,
+                x + vx * dt,
+                y + vy * dt,
                 wrap_angle(yaw + yaw_rate * dt),
                 vx_next,
                 vy_next,
