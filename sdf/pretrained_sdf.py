@@ -89,6 +89,19 @@ class PretrainedShapeSDF:
             world_gradient /= norm
         return value, world_gradient
 
+    def obstacle_barriers(self, state: np.ndarray, field: ObstacleField) -> np.ndarray:
+        """Return one robot-shape SDF barrier value per obstacle."""
+        obstacle_points = self._obstacle_points(field)
+        x, y = state[:2]
+        theta = float(state[2]) if state.size >= 3 else 0.0
+        c, s = np.cos(theta), np.sin(theta)
+        rot = np.array([[c, -s], [s, c]], dtype=float)
+        local_xy = (obstacle_points - np.array([x, y], dtype=float)) @ rot
+        local_points = np.column_stack((local_xy, np.zeros(local_xy.shape[0])))
+        values = self._value_and_local_gradient(local_points)[0]
+        values = values.reshape((len(field.obstacles), self.points_per_obstacle))
+        return np.min(values, axis=1)
+
     def _obstacle_points(self, field: ObstacleField) -> np.ndarray:
         cache_key = tuple((float(obs.center[0]), float(obs.center[1]), float(obs.radius)) for obs in field.obstacles)
         if cache_key != self._field_cache_key or self._field_cache_points is None:

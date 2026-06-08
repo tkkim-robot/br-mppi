@@ -41,6 +41,31 @@ class DynamicUnicycleRobot(RobotModel):
             dtype=float,
         )
 
+    def drift(self, state: np.ndarray) -> np.ndarray:
+        _, _, theta, v, omega = state
+        return np.array([v * np.cos(theta), v * np.sin(theta), omega, 0.0, 0.0], dtype=float)
+
+    def control_matrix(self, state: np.ndarray) -> np.ndarray:
+        return np.array(
+            [
+                [0.0, 0.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+                [1.0, 0.0],
+                [0.0, 1.0],
+            ],
+            dtype=float,
+        )
+
+    def projection_barrier_state(self, state: np.ndarray, dt: float) -> np.ndarray:
+        lookahead = 5.0 * dt
+        projected = state.copy()
+        theta, v, omega = state[2], state[3], state[4]
+        projected[0] += v * np.cos(theta) * lookahead
+        projected[1] += v * np.sin(theta) * lookahead
+        projected[2] = wrap_angle(theta + omega * lookahead)
+        return projected
+
     def nominal_control(self, state: np.ndarray, goal: np.ndarray) -> np.ndarray:
         delta = goal - self.position(state)
         desired = np.arctan2(delta[1], delta[0])

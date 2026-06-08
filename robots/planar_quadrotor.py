@@ -41,6 +41,28 @@ class PlanarQuadrotorRobot(RobotModel):
             dtype=float,
         )
 
+    def drift(self, state: np.ndarray) -> np.ndarray:
+        return np.array([state[3], state[4], 0.0, 0.0, 0.0], dtype=float)
+
+    def control_matrix(self, state: np.ndarray) -> np.ndarray:
+        return np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ],
+            dtype=float,
+        )
+
+    def projection_barrier_state(self, state: np.ndarray, dt: float) -> np.ndarray:
+        lookahead = 5.0 * dt
+        projected = state.copy()
+        projected[0] += state[3] * lookahead
+        projected[1] += state[4] * lookahead
+        return projected
+
     def nominal_control(self, state: np.ndarray, goal: np.ndarray) -> np.ndarray:
         position_error = goal - self.position(state)
         desired_velocity = np.clip(0.85 * position_error, -self.velocity_limit, self.velocity_limit)

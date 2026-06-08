@@ -24,6 +24,18 @@ class RobotModel:
     def step(self, state: np.ndarray, control: np.ndarray, dt: float) -> np.ndarray:
         raise NotImplementedError
 
+    def drift(self, state: np.ndarray) -> np.ndarray:
+        """Continuous-time drift f(x) for control-affine dynamics xdot = f(x) + g(x)u."""
+        return np.zeros(self.state_dim, dtype=float)
+
+    def control_matrix(self, state: np.ndarray) -> np.ndarray:
+        """Continuous-time control matrix g(x) for control-affine dynamics."""
+        raise NotImplementedError
+
+    def projection_barrier_state(self, state: np.ndarray, dt: float) -> np.ndarray:
+        """State used to evaluate BR-MPPI projection barriers."""
+        return state.copy()
+
     def position(self, state: np.ndarray) -> np.ndarray:
         return state[:2].astype(float)
 

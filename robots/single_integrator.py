@@ -22,5 +22,8 @@ class SingleIntegratorRobot(RobotModel):
         u = self.clip_control(control)
         return state + u * dt
 
+    def control_matrix(self, state: np.ndarray) -> np.ndarray:
+        return np.eye(2, dtype=float)
+
     def nominal_control(self, state: np.ndarray, goal: np.ndarray) -> np.ndarray:
         return self.clip_control(0.85 * (goal - self.position(state)))

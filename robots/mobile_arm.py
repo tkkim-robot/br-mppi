@@ -59,6 +59,14 @@ class MobileArmRobot(RobotModel):
         next_state[2] = wrap_angle(theta + omega * dt)
         return next_state
 
+    def control_matrix(self, state: np.ndarray) -> np.ndarray:
+        theta = state[2]
+        matrix = np.zeros((self.state_dim, self.control_dim), dtype=float)
+        matrix[0, 0] = np.cos(theta)
+        matrix[1, 0] = np.sin(theta)
+        matrix[2, 1] = 1.0
+        return matrix
+
     def nominal_control(self, state: np.ndarray, goal: np.ndarray) -> np.ndarray:
         delta = goal - self.position(state)
         desired = np.arctan2(delta[1], delta[0])

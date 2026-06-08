@@ -31,6 +31,17 @@ class UnicycleRobot(RobotModel):
         next_state[2] = wrap_angle(theta + omega * dt)
         return next_state
 
+    def control_matrix(self, state: np.ndarray) -> np.ndarray:
+        theta = state[2]
+        return np.array(
+            [
+                [np.cos(theta), 0.0],
+                [np.sin(theta), 0.0],
+                [0.0, 1.0],
+            ],
+            dtype=float,
+        )
+
     def nominal_control(self, state: np.ndarray, goal: np.ndarray) -> np.ndarray:
         delta = goal - self.position(state)
         desired = np.arctan2(delta[1], delta[0])
