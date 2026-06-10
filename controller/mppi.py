@@ -41,6 +41,9 @@ class MPPIConfig:
     barrier_buffer_distance: float = 0.2
     barrier_projection_margin: float = 0.12
     barrier_alpha_cost_weight: float = 0.01
+    br_clearance_margin: float = 0.45
+    br_clearance_weight: float = 150.0
+    br_collision_weight: float = 100000.0
     plot_samples: int = 100
 
 
@@ -225,6 +228,7 @@ class MPPIController:
                 cost += self._safety_cost(h_next)
             elif self.algo == "brmppi":
                 cost += self._barrier_alpha_cost(x, alpha)
+                cost += self._br_safety_cost(h_next)
 
             if self.algo == "penalty_mppi" and h_next < 0.0:
                 cost += cfg.collision_weight * (1.0 + abs(h_next)) ** 2
@@ -269,6 +273,15 @@ class MPPIController:
         if clearance <= 0.0:
             return self.config.safety_weight * (margin - clearance) ** 2 + self.config.collision_weight
         return self.config.safety_weight * (margin - clearance) ** 2
+
+    def _br_safety_cost(self, clearance: float) -> float:
+        margin = self.config.br_clearance_margin
+        if clearance >= margin:
+            return 0.0
+        cost = self.config.br_clearance_weight * (margin - clearance) ** 2
+        if clearance <= 0.0:
+            cost += self.config.br_collision_weight * (1.0 + abs(clearance)) ** 2
+        return float(cost)
 
     def _clearance(self, state: np.ndarray) -> float:
         points = self.robot.body_points(state)
