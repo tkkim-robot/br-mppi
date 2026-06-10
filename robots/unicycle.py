@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import jax.numpy as jnp
 import numpy as np
 from matplotlib.patches import Polygon
 
@@ -12,48 +13,54 @@ class UnicycleRobot(RobotModel):
             name="unicycle",
             state_dim=3,
             control_dim=2,
-            control_bounds=np.array([[-0.45, 1.45], [-2.2, 2.2]], dtype=float),
+            control_bounds=jnp.array([[-0.45, 1.45], [-2.2, 2.2]], dtype=float),
             radius=0.54,
             body_point_radius=0.08,
-            default_state=np.array([-7.0, -3.6, -0.75], dtype=float),
-            default_goal=np.array([7.0, 3.6], dtype=float),
+            default_state=jnp.array([-7.0, -3.6, -0.75], dtype=float),
+            default_goal=jnp.array([7.0, 3.6], dtype=float),
             goal_tolerance=0.45,
         )
         self.length = 1.0
         self.width = 0.4
 
-    def step(self, state: np.ndarray, control: np.ndarray, dt: float) -> np.ndarray:
+    def step(self, state: jnp.ndarray, control: jnp.ndarray, dt: float) -> jnp.ndarray:
+        state = jnp.asarray(state, dtype=float)
         v, omega = self.clip_control(control)
         theta = state[2]
-        next_state = state.copy()
-        next_state[0] += v * np.cos(theta) * dt
-        next_state[1] += v * np.sin(theta) * dt
-        next_state[2] = wrap_angle(theta + omega * dt)
-        return next_state
-
-    def control_matrix(self, state: np.ndarray) -> np.ndarray:
-        theta = state[2]
-        return np.array(
+        return jnp.array(
             [
-                [np.cos(theta), 0.0],
-                [np.sin(theta), 0.0],
+                state[0] + v * jnp.cos(theta) * dt,
+                state[1] + v * jnp.sin(theta) * dt,
+                wrap_angle(theta + omega * dt),
+            ],
+            dtype=float,
+        )
+
+    def control_matrix(self, state: jnp.ndarray) -> jnp.ndarray:
+        theta = jnp.asarray(state, dtype=float)[2]
+        return jnp.array(
+            [
+                [jnp.cos(theta), 0.0],
+                [jnp.sin(theta), 0.0],
                 [0.0, 1.0],
             ],
             dtype=float,
         )
 
-    def nominal_control(self, state: np.ndarray, goal: np.ndarray) -> np.ndarray:
-        delta = goal - self.position(state)
-        desired = np.arctan2(delta[1], delta[0])
+    def nominal_control(self, state: jnp.ndarray, goal: jnp.ndarray) -> jnp.ndarray:
+        state = jnp.asarray(state, dtype=float)
+        delta = jnp.asarray(goal, dtype=float) - self.position(state)
+        desired = jnp.arctan2(delta[1], delta[0])
         heading_error = wrap_angle(desired - state[2])
-        distance = np.linalg.norm(delta)
-        v = np.clip(0.9 * distance * max(0.15, np.cos(heading_error)), -0.2, 1.2)
+        distance = jnp.linalg.norm(delta)
+        v = jnp.clip(0.9 * distance * jnp.maximum(0.15, jnp.cos(heading_error)), -0.2, 1.2)
         omega = 2.4 * heading_error
-        return self.clip_control(np.array([v, omega], dtype=float))
+        return self.clip_control(jnp.array([v, omega], dtype=float))
 
-    def body_points(self, state: np.ndarray) -> np.ndarray:
+    def body_points(self, state: jnp.ndarray) -> jnp.ndarray:
+        state = jnp.asarray(state, dtype=float)
         x, y, theta = state
-        corners = np.array(
+        corners = jnp.array(
             [
                 [-self.length / 2, -self.width / 2],
                 [self.length / 2, -self.width / 2],
@@ -63,11 +70,11 @@ class UnicycleRobot(RobotModel):
             ],
             dtype=float,
         )
-        rot = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
-        return corners @ rot.T + np.array([x, y])
+        rot = jnp.array([[jnp.cos(theta), -jnp.sin(theta)], [jnp.sin(theta), jnp.cos(theta)]])
+        return corners @ rot.T + jnp.array([x, y])
 
-    def draw(self, ax, state: np.ndarray, **kwargs) -> None:
-        points = self.body_points(state)[:4]
+    def draw(self, ax, state: jnp.ndarray, **kwargs) -> None:
+        points = np.asarray(self.body_points(state)[:4], dtype=float)
         color = kwargs.pop("color", "tab:orange")
         edgecolor = kwargs.pop("edgecolor", "black")
         ax.add_patch(Polygon(points, closed=True, facecolor=color, edgecolor=edgecolor, alpha=0.8, **kwargs))

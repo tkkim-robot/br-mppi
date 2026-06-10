@@ -7,6 +7,7 @@ import sys
 
 import matplotlib
 from matplotlib.animation import FFMpegWriter
+import jax.numpy as jnp
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -27,17 +28,17 @@ ROBOT_SHORTHANDS = {
 }
 
 DEMO_DEFAULTS = {
-    "single_integrator": {"steps": 120, "horizon": 20, "samples": 80, "plot_samples": 80},
-    "unicycle": {"steps": 240, "horizon": 36, "samples": 80, "plot_samples": 80},
-    "dynamic_unicycle": {"steps": 120, "horizon": 20, "samples": 80, "plot_samples": 80},
-    "planar_quadrotor": {"steps": 120, "horizon": 36, "samples": 80, "plot_samples": 80},
-    "mobile_arm": {"steps": 80, "horizon": 28, "samples": 96, "plot_samples": 96},
+    "single_integrator": {"steps": 500, "horizon": 20, "samples": 80, "plot_samples": 80},
+    "unicycle": {"steps": 500, "horizon": 36, "samples": 80, "plot_samples": 80},
+    "dynamic_unicycle": {"steps": 500, "horizon": 20, "samples": 80, "plot_samples": 80},
+    "planar_quadrotor": {"steps": 500, "horizon": 36, "samples": 80, "plot_samples": 80},
+    "mobile_arm": {"steps": 500, "horizon": 28, "samples": 96, "plot_samples": 96},
 }
 
 NSDF_DEFAULTS = {
-    "unicycle": {"steps": 80, "horizon": 28, "samples": 56, "plot_samples": 56},
-    "dynamic_unicycle": {"steps": 80, "horizon": 28, "samples": 56, "plot_samples": 56},
-    "planar_quadrotor": {"steps": 80, "horizon": 28, "samples": 56, "plot_samples": 56},
+    "unicycle": {"steps": 500, "horizon": 28, "samples": 56, "plot_samples": 56},
+    "dynamic_unicycle": {"steps": 500, "horizon": 28, "samples": 56, "plot_samples": 56},
+    "planar_quadrotor": {"steps": 500, "horizon": 28, "samples": 56, "plot_samples": 56},
 }
 
 
@@ -106,8 +107,8 @@ def main() -> None:
     sampled_rollouts = []
     best_rollouts = []
     min_exact_clearance = exact_clearance(field, robot, state)
-    min_sampled_rollout_clearance = np.inf
-    min_best_rollout_clearance = np.inf
+    min_sampled_rollout_clearance = float("inf")
+    min_best_rollout_clearance = float("inf")
     max_sampled_collision_fraction = 0.0
     first_sample_collision_step: int | None = None
     first_best_collision_step: int | None = None
@@ -137,12 +138,12 @@ def main() -> None:
         if current_clearance < 0.0:
             collision_index = len(trajectory) - 1
             break
-        if np.linalg.norm(robot.position(state) - goal) <= robot.goal_tolerance:
+        if float(jnp.linalg.norm(robot.position(state) - goal)) <= robot.goal_tolerance:
             reached = True
             break
 
-    trajectory_arr = np.vstack(trajectory)
-    final_error = float(np.linalg.norm(robot.position(state) - goal))
+    trajectory_arr = jnp.vstack(trajectory)
+    final_error = float(jnp.linalg.norm(robot.position(state) - goal))
     collision = collision_index is not None
     output_path = args.save or default_plot_path(args)
     bounds = axis_bounds(field, robot, trajectory_arr, goal)
@@ -186,18 +187,18 @@ def main() -> None:
         print(f"animation={animation_path}")
 
 
-def exact_clearance(field, robot, state: np.ndarray) -> float:
-    return float(np.min(field.signed_distance(robot.body_points(state))) - robot.body_point_radius)
+def exact_clearance(field, robot, state: jnp.ndarray) -> float:
+    return float(jnp.min(field.signed_distance(robot.body_points(state))) - robot.body_point_radius)
 
 
 def format_optional_step(step: int | None) -> str:
     return "none" if step is None else str(step)
 
 
-def collision_point(field, robot, state: np.ndarray) -> np.ndarray:
+def collision_point(field, robot, state: jnp.ndarray) -> jnp.ndarray:
     points = robot.body_points(state)
     distances = field.signed_distance(points)
-    return points[int(np.argmin(distances))]
+    return points[int(jnp.argmin(distances))]
 
 
 def plot_demo(

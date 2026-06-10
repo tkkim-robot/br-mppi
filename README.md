@@ -57,20 +57,17 @@ The current BR-MPPI review videos use the analytic h-function/SDF path. Do not p
 animations in `output/animations/`:
 
 ```bash
-uv run python examples/basic_demo.py --algo brmppi --robot single_integrator 
-uv run python examples/basic_demo.py --algo brmppi --robot unicycle
-uv run python examples/basic_demo.py --algo brmppi --robot dynamic_unicycle
-uv run python examples/basic_demo.py --algo brmppi --robot planar_quadrotor
-uv run python examples/basic_demo.py --algo brmppi --robot mobile_arm
+uv run python examples/basic_demo.py --algo brmppi --robot single_integrator --save-animation --headless
+uv run python examples/basic_demo.py --algo brmppi --robot unicycle --save-animation --headless
+uv run python examples/basic_demo.py --algo brmppi --robot dynamic_unicycle --save-animation --headless
+uv run python examples/basic_demo.py --algo brmppi --robot planar_quadrotor --save-animation --headless
+uv run python examples/basic_demo.py --algo brmppi --robot mobile_arm --save-animation --headless
 ```
 
-The default mobile-arm review run is intentionally capped at 80 simulation steps
-because the dense mobile-arm BR-MPPI rollout is slow on CPU. To reproduce the
-longer goal-reaching mobile-arm animation, use:
-
-```bash
-uv run python examples/basic_demo.py --algo brmppi --robot mobile_arm --steps 420 --animation-stride 4
-```
+The default simulation cap is generous, 500 steps, now that the JAX controller
+can evaluate the sampled rollouts quickly. Successful runs terminate early as
+soon as the robot reaches its goal tolerance, so the larger cap prevents clipped
+review videos without making already-successful runs continue unnecessarily.
 
 Choose the controller:
 
@@ -121,7 +118,7 @@ uv run python examples/sanity_check.py --include-nsdf
 
 This prints executed, sampled-rollout, and best-rollout clearance metrics for the analytic and neural-SDF barrier paths. Use it as the quick baseline when changing BR-MPPI cost terms.
 
-The demo uses robot-specific default horizons so the BR-MPPI sample cloud visibly branches around obstacles. The single-integrator and dynamic-unicycle cases use 20-step rollout horizons, while unicycle and planar-quadrotor cases use 36-step rollout horizons by default. The mobile-arm default uses a 28-step horizon because its sampled footprint is much heavier to evaluate. Neural-SDF runs use 28-step horizons for the supported robots. You can still override these with `--horizon`, `--samples`, `--steps`, and `--plot-samples`.
+The demo uses robot-specific default horizons so the BR-MPPI sample cloud visibly branches around obstacles. The single-integrator and dynamic-unicycle cases use 20-step rollout horizons, while unicycle and planar-quadrotor cases use 36-step rollout horizons by default. The mobile-arm default uses a 28-step horizon because its sampled footprint is much heavier to evaluate. Neural-SDF runs use 28-step horizons for the supported robots. All demos default to a 500-step maximum simulation cap and stop early on goal success. You can still override these with `--horizon`, `--samples`, `--steps`, and `--plot-samples`.
 
 The default scene uses a larger random-looking circular obstacle field inspired by the BR-MPPI paper's branching-rollout illustration. A straight-line path from start to goal intersects obstacles for every robot, and the useful trajectories snake through clutter with obstacles on both sides instead of bypassing the field along open edges. The mobile-arm demo uses an even larger workspace with its own obstacle field because its fixed footprint is much larger. The green transparent lines are the MPPI sample cloud and the dashed blue line is the best sampled rollout at the current step.
 
@@ -129,7 +126,7 @@ The BR-MPPI implementation samples augmented controls `[u, alpha_dot]`, carries 
 
 Each run prints three safety diagnostics: executed trajectory clearance, minimum sampled-rollout clearance, and minimum best-rollout clearance. Collided samples can still appear in the MPPI population because sampling remains stochastic, but the selected best rollout should stay collision-free when the cost tuning is working.
 
-If a rollout collides, the simulation stops at the first collision. Plots and videos draw a bold red `!` at the closest colliding body sample, and MP4 output holds that final collision frame briefly before ending.
+If the executed trajectory reaches the goal, the simulation stops successfully. If it collides, the simulation stops at the first collision. Plots and videos draw a bold red `!` at the closest colliding body sample, and MP4 output holds that final collision frame briefly before ending.
 
 The `mobile_arm` demo model uses a `1.5 x 1.0` planar base, two arm mounts at `[-0.5, 0]` and `[0.5, 0]`, two 4-link arms with link lengths `[0.8, 0.6, 0.4, 0.2]`, and a folded two-arm posture. The controller plans the two base controls plus eight joint velocity controls, while dense base and link edge samples are included in collision checking and visualization.
 

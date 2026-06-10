@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import sys
 
-import numpy as np
+import jax.numpy as jnp
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -40,7 +40,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--algo", choices=("brmppi", "mppi", "penalty_mppi"), default="brmppi")
     parser.add_argument("--robot", choices=tuple(sorted(ROBOT_REGISTRY)), default="unicycle")
     parser.add_argument("--include-nsdf", action="store_true", help="Also run the pretrained neural-SDF barrier case.")
-    parser.add_argument("--steps", type=int, default=20)
+    parser.add_argument("--steps", type=int, default=500)
     parser.add_argument("--horizon", type=int, default=12)
     parser.add_argument("--samples", type=int, default=16)
     parser.add_argument("--dt", type=float, default=0.1)
@@ -67,8 +67,8 @@ def run_case(args: argparse.Namespace, *, nsdf: bool) -> SanityResult:
     goal = robot.default_goal.copy()
 
     min_exact_clearance = exact_clearance(field, robot, state)
-    min_sampled_rollout_clearance = np.inf
-    min_best_rollout_clearance = np.inf
+    min_sampled_rollout_clearance = float("inf")
+    min_best_rollout_clearance = float("inf")
     max_sampled_collision_fraction = 0.0
     first_sample_collision_step: int | None = None
     first_best_collision_step: int | None = None
@@ -98,11 +98,11 @@ def run_case(args: argparse.Namespace, *, nsdf: bool) -> SanityResult:
         if current_clearance < 0.0:
             collision = True
             break
-        if np.linalg.norm(robot.position(state) - goal) <= robot.goal_tolerance:
+        if float(jnp.linalg.norm(robot.position(state) - goal)) <= robot.goal_tolerance:
             reached = True
             break
 
-    final_error = float(np.linalg.norm(robot.position(state) - goal))
+    final_error = float(jnp.linalg.norm(robot.position(state) - goal))
     return SanityResult(
         robot=robot.name,
         algo=args.algo,
@@ -121,8 +121,8 @@ def run_case(args: argparse.Namespace, *, nsdf: bool) -> SanityResult:
     )
 
 
-def exact_clearance(field, robot, state: np.ndarray) -> float:
-    return float(np.min(field.signed_distance(robot.body_points(state))) - robot.body_point_radius)
+def exact_clearance(field, robot, state: jnp.ndarray) -> float:
+    return float(jnp.min(field.signed_distance(robot.body_points(state))) - robot.body_point_radius)
 
 
 def print_table(results: list[SanityResult]) -> None:

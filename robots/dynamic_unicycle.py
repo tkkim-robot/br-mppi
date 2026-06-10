@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import jax.numpy as jnp
 import numpy as np
 from matplotlib.patches import Polygon
 
@@ -12,35 +13,37 @@ class DynamicUnicycleRobot(RobotModel):
             name="dynamic_unicycle",
             state_dim=4,
             control_dim=2,
-            control_bounds=np.array([[-3.0, 3.0], [-3.0, 3.0]], dtype=float),
+            control_bounds=jnp.array([[-3.0, 3.0], [-3.0, 3.0]], dtype=float),
             radius=0.54,
             body_point_radius=0.08,
-            default_state=np.array([-7.0, -3.6, -0.75, 0.0], dtype=float),
-            default_goal=np.array([7.0, 3.6], dtype=float),
+            default_state=jnp.array([-7.0, -3.6, -0.75, 0.0], dtype=float),
+            default_goal=jnp.array([7.0, 3.6], dtype=float),
             goal_tolerance=0.5,
         )
         self.length = 1.0
         self.width = 0.4
 
-    def step(self, state: np.ndarray, control: np.ndarray, dt: float) -> np.ndarray:
+    def step(self, state: jnp.ndarray, control: jnp.ndarray, dt: float) -> jnp.ndarray:
+        state = jnp.asarray(state, dtype=float)
         accel, omega = self.clip_control(control)
         x, y, theta, v = state
-        return np.array(
+        return jnp.array(
             [
-                x + v * np.cos(theta) * dt,
-                y + v * np.sin(theta) * dt,
+                x + v * jnp.cos(theta) * dt,
+                y + v * jnp.sin(theta) * dt,
                 wrap_angle(theta + omega * dt),
                 v + accel * dt,
             ],
             dtype=float,
         )
 
-    def drift(self, state: np.ndarray) -> np.ndarray:
+    def drift(self, state: jnp.ndarray) -> jnp.ndarray:
+        state = jnp.asarray(state, dtype=float)
         _, _, theta, v = state
-        return np.array([v * np.cos(theta), v * np.sin(theta), 0.0, 0.0], dtype=float)
+        return jnp.array([v * jnp.cos(theta), v * jnp.sin(theta), 0.0, 0.0], dtype=float)
 
-    def control_matrix(self, state: np.ndarray) -> np.ndarray:
-        return np.array(
+    def control_matrix(self, state: jnp.ndarray) -> jnp.ndarray:
+        return jnp.array(
             [
                 [0.0, 0.0],
                 [0.0, 0.0],
@@ -50,27 +53,27 @@ class DynamicUnicycleRobot(RobotModel):
             dtype=float,
         )
 
-    def projection_barrier_state(self, state: np.ndarray, dt: float) -> np.ndarray:
+    def projection_barrier_state(self, state: jnp.ndarray, dt: float) -> jnp.ndarray:
+        state = jnp.asarray(state, dtype=float)
         lookahead = 5.0 * dt
-        projected = state.copy()
         theta, v = state[2], state[3]
-        projected[0] += v * np.cos(theta) * lookahead
-        projected[1] += v * np.sin(theta) * lookahead
-        return projected
+        return state.at[0].add(v * jnp.cos(theta) * lookahead).at[1].add(v * jnp.sin(theta) * lookahead)
 
-    def nominal_control(self, state: np.ndarray, goal: np.ndarray) -> np.ndarray:
-        delta = goal - self.position(state)
-        desired = np.arctan2(delta[1], delta[0])
+    def nominal_control(self, state: jnp.ndarray, goal: jnp.ndarray) -> jnp.ndarray:
+        state = jnp.asarray(state, dtype=float)
+        delta = jnp.asarray(goal, dtype=float) - self.position(state)
+        desired = jnp.arctan2(delta[1], delta[0])
         heading_error = wrap_angle(desired - state[2])
-        distance = np.linalg.norm(delta)
-        desired_v = np.clip(0.75 * distance * max(0.1, np.cos(heading_error)), 0.0, 1.25)
+        distance = jnp.linalg.norm(delta)
+        desired_v = jnp.clip(0.75 * distance * jnp.maximum(0.1, jnp.cos(heading_error)), 0.0, 1.25)
         accel = 1.8 * (desired_v - state[3])
         omega = 2.2 * heading_error
-        return self.clip_control(np.array([accel, omega], dtype=float))
+        return self.clip_control(jnp.array([accel, omega], dtype=float))
 
-    def body_points(self, state: np.ndarray) -> np.ndarray:
+    def body_points(self, state: jnp.ndarray) -> jnp.ndarray:
+        state = jnp.asarray(state, dtype=float)
         x, y, theta = state[:3]
-        corners = np.array(
+        corners = jnp.array(
             [
                 [-self.length / 2, -self.width / 2],
                 [self.length / 2, -self.width / 2],
@@ -80,10 +83,11 @@ class DynamicUnicycleRobot(RobotModel):
             ],
             dtype=float,
         )
-        rot = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
-        return corners @ rot.T + np.array([x, y])
+        rot = jnp.array([[jnp.cos(theta), -jnp.sin(theta)], [jnp.sin(theta), jnp.cos(theta)]])
+        return corners @ rot.T + jnp.array([x, y])
 
-    def draw(self, ax, state: np.ndarray, **kwargs) -> None:
+    def draw(self, ax, state: jnp.ndarray, **kwargs) -> None:
         color = kwargs.pop("color", "tab:orange")
         edgecolor = kwargs.pop("edgecolor", "black")
-        ax.add_patch(Polygon(self.body_points(state)[:4], closed=True, facecolor=color, edgecolor=edgecolor, alpha=0.8, **kwargs))
+        points = np.asarray(self.body_points(state)[:4], dtype=float)
+        ax.add_patch(Polygon(points, closed=True, facecolor=color, edgecolor=edgecolor, alpha=0.8, **kwargs))
