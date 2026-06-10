@@ -13,7 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from controller import MPPIConfig, MPPIController
+from controller import ALGORITHMS, MPPIConfig, MPPIController
 from robots import ROBOT_REGISTRY, create_robot
 from sdf import default_obstacle_field
 
@@ -49,7 +49,7 @@ class BaselineTrace:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Capture deterministic NumPy MPPI traces for JAX parity tests.")
     parser.add_argument("--robot", choices=tuple(sorted(ROBOT_REGISTRY)), default="unicycle")
-    parser.add_argument("--algo", choices=("brmppi", "mppi", "penalty_mppi"), default="brmppi")
+    parser.add_argument("--algo", choices=ALGORITHMS, default="brmppi")
     parser.add_argument("--steps", type=int, default=6)
     parser.add_argument("--horizon", type=int, default=8)
     parser.add_argument("--samples", type=int, default=12)

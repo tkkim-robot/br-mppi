@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from controller import MPPIConfig, MPPIController
+from controller import ALGORITHMS, MPPIConfig, MPPIController
 from robots import ROBOT_REGISTRY, create_robot
 from sdf import PretrainedSDFUnavailable, default_obstacle_field, load_pretrained_sdf_for_robot
 
@@ -37,7 +37,7 @@ class SanityResult:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run compact MPPI/BR-MPPI safety sanity checks.")
-    parser.add_argument("--algo", choices=("brmppi", "mppi", "penalty_mppi"), default="brmppi")
+    parser.add_argument("--algo", choices=ALGORITHMS, default="brmppi")
     parser.add_argument("--robot", choices=tuple(sorted(ROBOT_REGISTRY)), default="unicycle")
     parser.add_argument("--include-nsdf", action="store_true", help="Also run the pretrained neural-SDF barrier case.")
     parser.add_argument("--steps", type=int, default=500)
