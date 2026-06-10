@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import json
 from pathlib import Path
 import sys
@@ -261,10 +261,16 @@ def run_trial(
     max_steps: int,
     dt: float,
     warmup: bool,
+    config: MPPIConfig | None = None,
 ) -> TrialResult:
     robot = create_robot(robot_name)
-    config = MPPIConfig(horizon=horizon, samples=samples, dt=dt, plot_samples=0)
-    controller = MPPIController(robot, field, algo=algo, config=config, seed=controller_seed)
+    controller_config = replace(config, plot_samples=0) if config is not None else MPPIConfig(
+        horizon=horizon,
+        samples=samples,
+        dt=dt,
+        plot_samples=0,
+    )
+    controller = MPPIController(robot, field, algo=algo, config=controller_config, seed=controller_seed)
     if warmup:
         action, _diagnostics = controller.command(robot.default_state.copy(), robot.default_goal.copy())
         jax.block_until_ready(action)
