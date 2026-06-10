@@ -96,16 +96,17 @@ The benchmark stops a trial immediately on collision, stops successfully when th
 
 ## Tuning Objective
 
-The Optuna objective is success-rate first:
+The Optuna objective is lexicographic in spirit:
 
 ```text
 success = reached goal without collision
 success_rate = successes / 100 randomized benchmark trials
+objective = success_rate - collision_penalty - timeout_penalty + tiny_time_bonus
 ```
 
-For equal success rates, the script adds a very small travel-time tie-breaker based on average successful travel time. The tie-breaker is deliberately smaller than one success out of 100 trials, so it cannot dominate success rate.
+The scalar score is weighted so success dominates the tie-breakers, collisions are worse than timeouts, and successful travel time is only the final nudge among otherwise similar runs. This avoids tuning safety baselines toward fast but collision-prone behavior.
 
-Trials are pruned with Optuna `MedianPruner` using partial benchmark success rates every `--prune-interval` trials.
+Trials are pruned with Optuna `MedianPruner` using the partial safety-aware objective every `--prune-interval` benchmark trials.
 
 ## Step 1: Tune BR-MPPI
 
@@ -177,7 +178,7 @@ sc_mppi
 gs_mppi
 ```
 
-For methods with no extra parameters, such as plain `mppi`, the script still evaluates the fixed shared config and writes final benchmark files.
+For methods with no extra parameters, such as plain `mppi` with `--fixed-config --no-tune-shared`, the script detects that there is no search space and runs one evaluation trial instead of repeating identical Optuna trials. If you resume an existing study that already has a completed evaluation, it reuses that stored trial and still writes final benchmark files.
 
 ## Step 3: Repeat For All Dynamics
 

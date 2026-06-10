@@ -172,42 +172,53 @@ def random_obstacle_field(
     body_points = np.asarray(robot.body_points(robot.default_state), dtype=float)
     obstacle_count = int(rng.integers(min_obstacles, max_obstacles + 1))
     radius_low, radius_high = radius_range(robot.name)
-    obstacles: list[CircleObstacle] = []
+    placement_attempts = 4000
+    field_attempts = 8
 
-    for _ in range(obstacle_count):
-        accepted = False
-        for _attempt in range(4000):
-            radius = float(rng.uniform(radius_low, radius_high))
-            if rng.random() < 0.72:
-                t = float(rng.uniform(0.08, 0.92))
-                offset = float(rng.choice([-1.0, 1.0]) * rng.uniform(0.35, 2.4 + 0.2 * radius))
-                along_jitter = float(rng.normal(0.0, 0.45))
-                cross_jitter = float(rng.normal(0.0, 0.18))
-                center = start + t * axis + normal * (offset + cross_jitter) + tangent * along_jitter
-            else:
-                center = rng.uniform(low, high)
-            center = np.asarray(center, dtype=float)
-            if is_valid_obstacle(
-                center,
-                radius,
-                obstacles,
-                body_points,
-                start,
-                goal,
-                low,
-                high,
-                robot.body_point_radius,
-                start_clearance,
-                goal_clearance,
-            ):
-                obstacles.append(CircleObstacle(center=(float(center[0]), float(center[1])), radius=radius))
-                accepted = True
+    for _field_attempt in range(field_attempts):
+        obstacles: list[CircleObstacle] = []
+        field_failed = False
+        for _ in range(obstacle_count):
+            accepted = False
+            for _placement_attempt in range(placement_attempts):
+                radius = float(rng.uniform(radius_low, radius_high))
+                if rng.random() < 0.72:
+                    t = float(rng.uniform(0.08, 0.92))
+                    offset = float(rng.choice([-1.0, 1.0]) * rng.uniform(0.35, 2.4 + 0.2 * radius))
+                    along_jitter = float(rng.normal(0.0, 0.45))
+                    cross_jitter = float(rng.normal(0.0, 0.18))
+                    center = start + t * axis + normal * (offset + cross_jitter) + tangent * along_jitter
+                else:
+                    center = rng.uniform(low, high)
+                center = np.asarray(center, dtype=float)
+                if is_valid_obstacle(
+                    center,
+                    radius,
+                    obstacles,
+                    body_points,
+                    start,
+                    goal,
+                    low,
+                    high,
+                    robot.body_point_radius,
+                    start_clearance,
+                    goal_clearance,
+                ):
+                    obstacles.append(CircleObstacle(center=(float(center[0]), float(center[1])), radius=radius))
+                    accepted = True
+                    break
+            if not accepted:
+                field_failed = True
                 break
-        if not accepted:
-            center = rng.uniform(low, high)
-            obstacles.append(CircleObstacle(center=(float(center[0]), float(center[1])), radius=float(radius_low)))
+        if not field_failed:
+            return ObstacleField(obstacles=tuple(obstacles))
 
-    return ObstacleField(obstacles=tuple(obstacles))
+    raise RuntimeError(
+        "failed to place a valid randomized obstacle field "
+        f"for {robot.name}: requested {obstacle_count} obstacles after "
+        f"{field_attempts} field attempts x {placement_attempts} placement attempts. "
+        "Relax obstacle count, workspace margin, or clearance settings."
+    )
 
 
 def radius_range(robot_name: str) -> tuple[float, float]:

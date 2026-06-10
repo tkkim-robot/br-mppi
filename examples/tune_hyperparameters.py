@@ -33,6 +33,14 @@ from robots import ROBOT_REGISTRY, create_robot
 
 
 CONFIG_FIELD_NAMES = {field.name for field in fields(MPPIConfig)}
+ALGORITHMS_WITH_SPECIFIC_TUNING = {
+    "brmppi",
+    "penalty_mppi",
+    "mppi_cbf",
+    "shield_mppi",
+    "sc_mppi",
+    "gs_mppi",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -111,13 +119,23 @@ def main() -> None:
         storage=storage,
         load_if_exists=True,
     )
-    study.optimize(
-        optimizer.objective,
-        n_trials=args.optuna_trials,
-        timeout=None if args.timeout_hours is None else int(args.timeout_hours * 3600),
-        n_jobs=args.n_jobs,
-        show_progress_bar=True,
-    )
+    effective_optuna_trials = args.optuna_trials
+    if not optimizer.has_tunable_params():
+        has_completed_trial = any(trial.state == optuna.trial.TrialState.COMPLETE for trial in study.trials)
+        effective_optuna_trials = 0 if has_completed_trial else 1
+        action = "reusing the existing completed evaluation" if has_completed_trial else "running one evaluation trial"
+        print(
+            f"algo={args.algo} with tune_shared={tune_shared} has no tunable parameters; {action}.",
+            flush=True,
+        )
+    if effective_optuna_trials > 0:
+        study.optimize(
+            optimizer.objective,
+            n_trials=effective_optuna_trials,
+            timeout=None if args.timeout_hours is None else int(args.timeout_hours * 3600),
+            n_jobs=args.n_jobs,
+            show_progress_bar=True,
+        )
     best_config = optimizer.config_from_trial(study.best_trial)
     save_tuning_outputs(args, study, best_config, optimizer.completed_results)
 
@@ -159,6 +177,9 @@ class HyperparameterOptimizer:
         self.completed_results: list[dict[str, Any]] = []
         self.lock_horizon = args.horizon is not None
         self.lock_samples = args.samples is not None
+
+    def has_tunable_params(self) -> bool:
+        return self.tune_shared or self.args.algo in ALGORITHMS_WITH_SPECIFIC_TUNING
 
     def objective(self, trial: optuna.Trial) -> float:
         config = self.config_from_trial(trial)
@@ -248,11 +269,13 @@ class HyperparameterOptimizer:
             results.append(result)
             if report_pruning and optuna_trial is not None and (benchmark_idx + 1) % self.args.prune_interval == 0:
                 partial_metrics = objective_metrics(results, config.dt, self.max_steps)
-                optuna_trial.report(partial_metrics["success_rate"], step=benchmark_idx + 1)
+                optuna_trial.report(partial_metrics["objective_score"], step=benchmark_idx + 1)
                 if optuna_trial.should_prune():
                     print(
                         f"trial={optuna_trial.number:03d} pruned after {benchmark_idx + 1} "
-                        f"benchmark trials with success={partial_metrics['success_rate']:.3f}",
+                        f"benchmark trials with score={partial_metrics['objective_score']:.8f} "
+                        f"success={partial_metrics['success_rate']:.3f} "
+                        f"collision={partial_metrics['collision_rate']:.3f}",
                         flush=True,
                     )
                     raise optuna.TrialPruned()
@@ -363,13 +386,30 @@ def objective_metrics(results: list, dt: float, max_steps: int) -> dict[str, flo
     success_times = [result.steps * dt for result in results if result.reached]
     max_time = max_steps * dt
     avg_success_time = sum(success_times) / len(success_times) if success_times else max_time
-    travel_bonus = 0.001 * max(0.0, 1.0 - avg_success_time / max(max_time, 1e-9))
     success_rate = successes / total
+    collision_rate = collisions / total
+    timeout_rate = timeouts / total
+    travel_progress = max(0.0, 1.0 - avg_success_time / max(max_time, 1e-9))
+
+    # Lexicographic scalarization: success dominates safety tie-breakers,
+    # collisions dominate timeouts, and travel time is only the final nudge.
+    success_unit = 1.0 / total
+    collision_weight = 0.49 * success_unit
+    timeout_weight = 0.20 * collision_weight / total
+    travel_weight = 0.20 * timeout_weight / total
+    collision_penalty = collision_weight * collision_rate
+    timeout_penalty = timeout_weight * timeout_rate
+    travel_bonus = travel_weight * travel_progress
+    objective_score = success_rate - collision_penalty - timeout_penalty + travel_bonus
+
     return {
-        "objective_score": success_rate + travel_bonus,
+        "objective_score": objective_score,
         "success_rate": success_rate,
-        "collision_rate": collisions / total,
-        "timeout_rate": timeouts / total,
+        "collision_rate": collision_rate,
+        "timeout_rate": timeout_rate,
+        "collision_penalty": collision_penalty,
+        "timeout_penalty": timeout_penalty,
+        "travel_bonus": travel_bonus,
         "avg_success_time": avg_success_time,
         "mean_steps": sum(result.steps for result in results) / total,
         "mean_command_ms": sum(result.mean_command_ms for result in results) / total,
@@ -438,11 +478,43 @@ def save_tuning_outputs(args: argparse.Namespace, study: optuna.Study, best_conf
         "best_value": study.best_value,
         "best_params": study.best_params,
         "best_config_path": str(best_config_path),
-        "trials": records,
+        "trials": [optuna_trial_to_dict(trial) for trial in study.trials],
+        "current_process_trials": records,
     }
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(f"best_config={best_config_path}")
     print(f"study_report={report_path}")
+
+
+def optuna_trial_to_dict(trial: optuna.trial.FrozenTrial) -> dict[str, Any]:
+    duration_seconds = None
+    if trial.datetime_start is not None and trial.datetime_complete is not None:
+        duration_seconds = (trial.datetime_complete - trial.datetime_start).total_seconds()
+    return {
+        "number": trial.number,
+        "state": trial.state.name,
+        "value": json_safe(trial.value),
+        "values": json_safe(trial.values),
+        "params": json_safe(trial.params),
+        "user_attrs": json_safe(trial.user_attrs),
+        "datetime_start": json_safe(trial.datetime_start),
+        "datetime_complete": json_safe(trial.datetime_complete),
+        "duration_seconds": duration_seconds,
+    }
+
+
+def json_safe(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe(item) for item in value]
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, Path):
+        return str(value)
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return value
 
 
 def write_final_markdown(args: argparse.Namespace, study: optuna.Study, best_config: MPPIConfig, results: list) -> None:
