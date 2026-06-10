@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import jax.numpy as jnp
 import numpy as np
 
 from sdf.geometry import ObstacleField
@@ -26,9 +27,7 @@ SUPPORTED_PRETRAINED_SDFS = {
 }
 
 UNSUPPORTED_PRETRAINED_SDFS = {
-    "single_integrator": (
-        "no pretrained disk/point SDF was found in sdf/trained_models"
-    ),
+    "single_integrator": "no pretrained disk/point SDF was found in sdf/trained_models",
     "mobile_arm": (
         "the available pretrained files are canonical single-shape SDFs, not a model for "
         "the original mobile-arm base plus two fixed 4-link arms"
@@ -38,7 +37,7 @@ UNSUPPORTED_PRETRAINED_SDFS = {
 
 @dataclass
 class PretrainedShapeSDF:
-    """Numpy evaluator for the vendored Flax SDFNet checkpoints."""
+    """JAX evaluator for the vendored Flax SDFNet checkpoints."""
 
     robot_name: str
     spec: PretrainedSDFSpec
@@ -46,8 +45,9 @@ class PretrainedShapeSDF:
     points_per_obstacle: int = 16
 
     def __post_init__(self) -> None:
+        self.params = _params_to_jax(self.params)
         self._field_cache_key: tuple[tuple[float, float, float], ...] | None = None
-        self._field_cache_points: np.ndarray | None = None
+        self._field_cache_points: jnp.ndarray | None = None
 
     @property
     def description(self) -> str:
@@ -56,60 +56,55 @@ class PretrainedShapeSDF:
             f"source shape index {self.spec.source_shape_index})"
         )
 
-    def signed_distance(self, points: np.ndarray) -> np.ndarray:
+    def signed_distance(self, points: jnp.ndarray) -> jnp.ndarray:
         """Evaluate the checkpoint in its local shape frame."""
-        local_points = np.atleast_2d(points).astype(float)
-        if local_points.shape[1] == 2:
-            local_points = np.column_stack((local_points, np.zeros(local_points.shape[0])))
+        local_points = jnp.atleast_2d(jnp.asarray(points, dtype=float))
+        local_points = _pad_points_to_3d(local_points)
         return self._value_and_local_gradient(local_points)[0]
 
-    def distance_and_gradient(self, points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        local_points = np.atleast_2d(points).astype(float)
-        if local_points.shape[1] == 2:
-            local_points = np.column_stack((local_points, np.zeros(local_points.shape[0])))
+    def distance_and_gradient(self, points: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        local_points = jnp.atleast_2d(jnp.asarray(points, dtype=float))
+        local_points = _pad_points_to_3d(local_points)
         values, gradients = self._value_and_local_gradient(local_points)
         return values, gradients[:, :2]
 
-    def clearance_and_gradient(self, state: np.ndarray, field: ObstacleField) -> tuple[float, np.ndarray]:
+    def clearance_and_gradient(self, state: jnp.ndarray, field: ObstacleField) -> tuple[jnp.ndarray, jnp.ndarray]:
         obstacle_points = self._obstacle_points(field)
+        state = jnp.asarray(state, dtype=float)
         x, y = state[:2]
-        theta = float(state[2]) if state.size >= 3 else 0.0
-        c, s = np.cos(theta), np.sin(theta)
-        rot = np.array([[c, -s], [s, c]], dtype=float)
-        local_xy = (obstacle_points - np.array([x, y], dtype=float)) @ rot
-        local_points = np.column_stack((local_xy, np.zeros(local_xy.shape[0])))
+        theta = state[2] if state.shape[0] >= 3 else jnp.array(0.0, dtype=float)
+        c, s = jnp.cos(theta), jnp.sin(theta)
+        rot = jnp.array([[c, -s], [s, c]], dtype=float)
+        local_xy = (obstacle_points - jnp.array([x, y], dtype=float)) @ rot
+        local_points = jnp.column_stack((local_xy, jnp.zeros(local_xy.shape[0], dtype=float)))
         values, local_gradients = self._value_and_local_gradient(local_points)
-        nearest = int(np.argmin(values))
-        value = float(values[nearest])
+        nearest = jnp.argmin(values)
+        value = values[nearest]
 
         gx, gy = local_gradients[nearest, 0], local_gradients[nearest, 1]
-        world_gradient = np.array([-gx * c + gy * s, -gx * s - gy * c], dtype=float)
-        norm = np.linalg.norm(world_gradient)
-        if norm > 1e-8:
-            world_gradient /= norm
+        world_gradient = jnp.array([-gx * c + gy * s, -gx * s - gy * c], dtype=float)
+        norm = jnp.linalg.norm(world_gradient)
+        world_gradient = jnp.where(norm > 1e-8, world_gradient / jnp.maximum(norm, 1e-8), world_gradient)
         return value, world_gradient
 
-    def obstacle_barriers(self, state: np.ndarray, field: ObstacleField) -> np.ndarray:
+    def obstacle_barriers(self, state: jnp.ndarray, field: ObstacleField) -> jnp.ndarray:
         """Return one robot-shape SDF barrier value per obstacle."""
         obstacle_points = self._obstacle_points(field)
+        state = jnp.asarray(state, dtype=float)
         x, y = state[:2]
-        theta = float(state[2]) if state.size >= 3 else 0.0
-        c, s = np.cos(theta), np.sin(theta)
-        rot = np.array([[c, -s], [s, c]], dtype=float)
-        local_xy = (obstacle_points - np.array([x, y], dtype=float)) @ rot
-        local_points = np.column_stack((local_xy, np.zeros(local_xy.shape[0])))
+        theta = state[2] if state.shape[0] >= 3 else jnp.array(0.0, dtype=float)
+        c, s = jnp.cos(theta), jnp.sin(theta)
+        rot = jnp.array([[c, -s], [s, c]], dtype=float)
+        local_xy = (obstacle_points - jnp.array([x, y], dtype=float)) @ rot
+        local_points = jnp.column_stack((local_xy, jnp.zeros(local_xy.shape[0], dtype=float)))
         values = self._value_and_local_gradient(local_points)[0]
         values = values.reshape((len(field.obstacles), self.points_per_obstacle))
-        return np.min(values, axis=1)
+        return jnp.min(values, axis=1)
 
-    def _obstacle_points(self, field: ObstacleField) -> np.ndarray:
-        cache_key = tuple((float(obs.center[0]), float(obs.center[1]), float(obs.radius)) for obs in field.obstacles)
-        if cache_key != self._field_cache_key or self._field_cache_points is None:
-            self._field_cache_key = cache_key
-            self._field_cache_points = field.surface_points(self.points_per_obstacle)
-        return self._field_cache_points
+    def _obstacle_points(self, field: ObstacleField) -> jnp.ndarray:
+        return field.surface_points(self.points_per_obstacle)
 
-    def _value_and_local_gradient(self, points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def _value_and_local_gradient(self, points: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
         weights = self.params["params"]
         w0, b0 = _dense_params(weights, "Dense_0")
         w1, b1 = _dense_params(weights, "Dense_1")
@@ -146,19 +141,32 @@ def load_pretrained_sdf_for_robot(robot_name: str, *, repo_root: Path | None = N
     return PretrainedShapeSDF(robot_name=robot_name, spec=spec, params=params)
 
 
-def _dense_params(params: dict, name: str) -> tuple[np.ndarray, np.ndarray]:
+def _params_to_jax(params: dict) -> dict:
+    converted = {"params": {}}
+    for layer_name, layer in params["params"].items():
+        converted["params"][layer_name] = {
+            "kernel": jnp.asarray(layer["kernel"], dtype=float),
+            "bias": jnp.asarray(layer["bias"], dtype=float),
+        }
+    return converted
+
+
+def _dense_params(params: dict, name: str) -> tuple[jnp.ndarray, jnp.ndarray]:
     layer = params[name]
-    return np.asarray(layer["kernel"], dtype=float), np.asarray(layer["bias"], dtype=float)
+    return layer["kernel"], layer["bias"]
 
 
-def _softplus(x: np.ndarray) -> np.ndarray:
-    return np.log1p(np.exp(-np.abs(x))) + np.maximum(x, 0.0)
+def _pad_points_to_3d(points: jnp.ndarray) -> jnp.ndarray:
+    if points.shape[1] == 2:
+        return jnp.column_stack((points, jnp.zeros(points.shape[0], dtype=float)))
+    return points
 
 
-def _sigmoid(x: np.ndarray) -> np.ndarray:
+def _softplus(x: jnp.ndarray) -> jnp.ndarray:
+    return jnp.log1p(jnp.exp(-jnp.abs(x))) + jnp.maximum(x, 0.0)
+
+
+def _sigmoid(x: jnp.ndarray) -> jnp.ndarray:
     positive = x >= 0.0
-    out = np.empty_like(x, dtype=float)
-    out[positive] = 1.0 / (1.0 + np.exp(-x[positive]))
-    exp_x = np.exp(x[~positive])
-    out[~positive] = exp_x / (1.0 + exp_x)
-    return out
+    exp_x = jnp.exp(x)
+    return jnp.where(positive, 1.0 / (1.0 + jnp.exp(-x)), exp_x / (1.0 + exp_x))

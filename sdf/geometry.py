@@ -2,17 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import jax.numpy as jnp
 import numpy as np
 from matplotlib.patches import Circle
 
 
 @dataclass(frozen=True)
 class CircleObstacle:
-    center: np.ndarray
+    center: jnp.ndarray
     radius: float
 
     def __init__(self, center: tuple[float, float], radius: float) -> None:
-        object.__setattr__(self, "center", np.array(center, dtype=float))
+        object.__setattr__(self, "center", jnp.array(center, dtype=float))
         object.__setattr__(self, "radius", float(radius))
 
 
@@ -20,40 +21,41 @@ class CircleObstacle:
 class ObstacleField:
     obstacles: tuple[CircleObstacle, ...]
 
-    def signed_distance(self, points: np.ndarray) -> np.ndarray:
-        points = np.atleast_2d(points).astype(float)
-        values = []
-        for obs in self.obstacles:
-            values.append(np.linalg.norm(points - obs.center[None, :], axis=1) - obs.radius)
-        return np.min(np.vstack(values), axis=0)
+    @property
+    def centers(self) -> jnp.ndarray:
+        return jnp.stack([obs.center for obs in self.obstacles])
 
-    def distance_and_gradient(self, points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        points = np.atleast_2d(points).astype(float)
-        distances = []
-        gradients = []
-        for obs in self.obstacles:
-            delta = points - obs.center[None, :]
-            norms = np.linalg.norm(delta, axis=1)
-            safe_norms = np.maximum(norms, 1e-8)
-            distances.append(norms - obs.radius)
-            gradients.append(delta / safe_norms[:, None])
-        distance_stack = np.vstack(distances)
-        nearest = np.argmin(distance_stack, axis=0)
-        all_gradients = np.stack(gradients, axis=0)
-        chosen_distances = distance_stack[nearest, np.arange(points.shape[0])]
-        chosen_gradients = all_gradients[nearest, np.arange(points.shape[0])]
+    @property
+    def radii(self) -> jnp.ndarray:
+        return jnp.array([obs.radius for obs in self.obstacles], dtype=float)
+
+    def signed_distance(self, points: jnp.ndarray) -> jnp.ndarray:
+        points = jnp.atleast_2d(jnp.asarray(points, dtype=float))
+        distances = jnp.linalg.norm(points[:, None, :] - self.centers[None, :, :], axis=2) - self.radii[None, :]
+        return jnp.min(distances, axis=1)
+
+    def distance_and_gradient(self, points: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        points = jnp.atleast_2d(jnp.asarray(points, dtype=float))
+        delta = points[:, None, :] - self.centers[None, :, :]
+        norms = jnp.linalg.norm(delta, axis=2)
+        safe_norms = jnp.maximum(norms, 1e-8)
+        distances = norms - self.radii[None, :]
+        nearest = jnp.argmin(distances, axis=1)
+        chosen_distances = jnp.take_along_axis(distances, nearest[:, None], axis=1)[:, 0]
+        gradients = delta / safe_norms[:, :, None]
+        chosen_gradients = jnp.take_along_axis(gradients, nearest[:, None, None], axis=1)[:, 0, :]
         return chosen_distances, chosen_gradients
 
-    def surface_points(self, points_per_obstacle: int = 48) -> np.ndarray:
-        theta = np.linspace(0.0, 2.0 * np.pi, points_per_obstacle, endpoint=False)
-        unit_circle = np.column_stack((np.cos(theta), np.sin(theta)))
-        return np.vstack([obs.center[None, :] + obs.radius * unit_circle for obs in self.obstacles])
+    def surface_points(self, points_per_obstacle: int = 48) -> jnp.ndarray:
+        theta = jnp.linspace(0.0, 2.0 * jnp.pi, points_per_obstacle, endpoint=False)
+        unit_circle = jnp.stack((jnp.cos(theta), jnp.sin(theta)), axis=1)
+        return (self.centers[:, None, :] + self.radii[:, None, None] * unit_circle[None, :, :]).reshape((-1, 2))
 
     def draw(self, ax) -> None:
         for obs in self.obstacles:
             ax.add_patch(
                 Circle(
-                    obs.center,
+                    np.asarray(obs.center, dtype=float),
                     obs.radius,
                     facecolor="black",
                     edgecolor="black",

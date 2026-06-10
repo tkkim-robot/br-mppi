@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import jax
+import jax.numpy as jnp
 import numpy as np
 from matplotlib.patches import Polygon
 
@@ -10,11 +12,27 @@ class MobileArmRobot(RobotModel):
     """Planar mobile base with two fixed 4-link arms."""
 
     def __init__(self) -> None:
+        default_state = jnp.array(
+            [
+                -8.2,
+                -4.45,
+                -0.55,
+                jnp.pi / 2 + 0.3 * jnp.pi / 2,
+                -jnp.pi / 6,
+                -jnp.pi / 12,
+                -jnp.pi / 12,
+                jnp.pi / 2 - 0.3 * jnp.pi / 2,
+                jnp.pi / 6,
+                jnp.pi / 12,
+                jnp.pi / 12,
+            ],
+            dtype=float,
+        )
         super().__init__(
             name="mobile_arm",
             state_dim=11,
             control_dim=10,
-            control_bounds=np.array(
+            control_bounds=jnp.array(
                 [
                     [-0.25, 1.65],
                     [-2.1, 2.1],
@@ -24,75 +42,67 @@ class MobileArmRobot(RobotModel):
             ),
             radius=0.2,
             body_point_radius=0.02,
-            default_state=np.array(
-                [
-                    -8.2,
-                    -4.45,
-                    -0.55,
-                    np.pi / 2 + 0.3 * np.pi / 2,
-                    -np.pi / 6,
-                    -np.pi / 12,
-                    -np.pi / 12,
-                    np.pi / 2 - 0.3 * np.pi / 2,
-                    np.pi / 6,
-                    np.pi / 12,
-                    np.pi / 12,
-                ],
-                dtype=float,
-            ),
-            default_goal=np.array([8.2, 4.45], dtype=float),
+            default_state=default_state,
+            default_goal=jnp.array([8.2, 4.45], dtype=float),
             goal_tolerance=0.9,
         )
         self.base_length = 1.5
         self.base_width = 1.0
-        self.arm_offsets = np.array([[-0.5, 0.0], [0.5, 0.0]], dtype=float)
-        self.link_lengths = np.array([[0.8, 0.6, 0.4, 0.2], [0.8, 0.6, 0.4, 0.2]], dtype=float)
-        self.link_widths = np.array([[0.2, 0.15, 0.1, 0.05], [0.2, 0.15, 0.1, 0.05]], dtype=float)
+        self.arm_offsets = jnp.array([[-0.5, 0.0], [0.5, 0.0]], dtype=float)
+        self.link_lengths = jnp.array([[0.8, 0.6, 0.4, 0.2], [0.8, 0.6, 0.4, 0.2]], dtype=float)
+        self.link_widths = jnp.array([[0.2, 0.15, 0.1, 0.05], [0.2, 0.15, 0.1, 0.05]], dtype=float)
         self.base_edge_samples = 6
         self.link_edge_samples = 5
-        self.rest_joints = self.default_state[3:].copy()
+        self.rest_joints = default_state[3:]
 
-    def step(self, state: np.ndarray, control: np.ndarray, dt: float) -> np.ndarray:
+    def step(self, state: jnp.ndarray, control: jnp.ndarray, dt: float) -> jnp.ndarray:
+        state = jnp.asarray(state, dtype=float)
         u = self.clip_control(control)
         v, omega = u[:2]
-        next_state = state.copy()
         theta = state[2]
-        next_state[0] += v * np.cos(theta) * dt
-        next_state[1] += v * np.sin(theta) * dt
-        next_state[2] = wrap_angle(theta + omega * dt)
-        joints = state[3:] + u[2:] * dt
-        next_state[3:] = np.arctan2(np.sin(joints), np.cos(joints))
-        return next_state
+        base_next = jnp.array(
+            [
+                state[0] + v * jnp.cos(theta) * dt,
+                state[1] + v * jnp.sin(theta) * dt,
+                wrap_angle(theta + omega * dt),
+            ],
+            dtype=float,
+        )
+        joints = wrap_angle(state[3:] + u[2:] * dt)
+        return jnp.concatenate((base_next, joints))
 
-    def control_matrix(self, state: np.ndarray) -> np.ndarray:
-        theta = state[2]
-        matrix = np.zeros((self.state_dim, self.control_dim), dtype=float)
-        matrix[0, 0] = np.cos(theta)
-        matrix[1, 0] = np.sin(theta)
-        matrix[2, 1] = 1.0
-        matrix[3:, 2:] = np.eye(8)
+    def control_matrix(self, state: jnp.ndarray) -> jnp.ndarray:
+        theta = jnp.asarray(state, dtype=float)[2]
+        matrix = jnp.zeros((self.state_dim, self.control_dim), dtype=float)
+        matrix = matrix.at[0, 0].set(jnp.cos(theta))
+        matrix = matrix.at[1, 0].set(jnp.sin(theta))
+        matrix = matrix.at[2, 1].set(1.0)
+        matrix = matrix.at[3:, 2:].set(jnp.eye(8, dtype=float))
         return matrix
 
-    def nominal_control(self, state: np.ndarray, goal: np.ndarray) -> np.ndarray:
-        delta = goal - self.position(state)
-        desired = np.arctan2(delta[1], delta[0])
+    def nominal_control(self, state: jnp.ndarray, goal: jnp.ndarray) -> jnp.ndarray:
+        state = jnp.asarray(state, dtype=float)
+        delta = jnp.asarray(goal, dtype=float) - self.position(state)
+        desired = jnp.arctan2(delta[1], delta[0])
         heading_error = wrap_angle(desired - state[2])
-        distance = np.linalg.norm(delta)
-        v = np.clip(0.7 * distance * max(0.1, np.cos(heading_error)), 0.0, 1.35)
+        distance = jnp.linalg.norm(delta)
+        v = jnp.clip(0.7 * distance * jnp.maximum(0.1, jnp.cos(heading_error)), 0.0, 1.35)
         omega = 2.0 * heading_error
         joint_velocity = -0.35 * (state[3:] - self.rest_joints)
-        return self.clip_control(np.concatenate((np.array([v, omega], dtype=float), joint_velocity)))
+        return self.clip_control(jnp.concatenate((jnp.array([v, omega], dtype=float), joint_velocity)))
 
-    def body_points(self, state: np.ndarray) -> np.ndarray:
+    def body_points(self, state: jnp.ndarray) -> jnp.ndarray:
         base = self.base_polygon(state)
-        points = [self._sample_polygon_edges(base, self.base_edge_samples), np.mean(base, axis=0, keepdims=True)]
-        for polygon in self.link_polygons(state):
-            points.append(self._sample_polygon_edges(polygon, self.link_edge_samples))
-            points.append(np.mean(polygon, axis=0, keepdims=True))
-        return np.vstack(points)
+        base_points = self._sample_polygon_edges(base, self.base_edge_samples)
+        base_center = jnp.mean(base, axis=0, keepdims=True)
+        link_polygons = self.link_polygons(state)
+        link_samples = jax.vmap(lambda polygon: self._sample_polygon_edges(polygon, self.link_edge_samples))(link_polygons)
+        link_centers = jnp.mean(link_polygons, axis=1, keepdims=True)
+        per_link = jnp.concatenate((link_samples, link_centers), axis=1).reshape((-1, 2))
+        return jnp.vstack((base_points, base_center, per_link))
 
-    def base_polygon(self, state: np.ndarray) -> np.ndarray:
-        base = np.array(
+    def base_polygon(self, state: jnp.ndarray) -> jnp.ndarray:
+        base = jnp.array(
             [
                 [-self.base_length / 2, -self.base_width / 2],
                 [self.base_length / 2, -self.base_width / 2],
@@ -101,64 +111,69 @@ class MobileArmRobot(RobotModel):
             ],
             dtype=float,
         )
+        state = jnp.asarray(state, dtype=float)
         x, y, theta = state[:3]
         rot = self._rot(theta)
-        return base @ rot.T + np.array([x, y])
+        return base @ rot.T + jnp.array([x, y])
 
-    def arm_polylines(self, state: np.ndarray) -> list[np.ndarray]:
+    def arm_polylines(self, state: jnp.ndarray) -> jnp.ndarray:
+        state = jnp.asarray(state, dtype=float)
         x, y, theta = state[:3]
         rot = self._rot(theta)
         joints = state[3:].reshape(2, 4)
-        arms = []
-        for arm_idx in range(2):
-            shoulder = np.array([x, y]) + rot @ self.arm_offsets[arm_idx]
-            angle = theta
-            points = [shoulder]
-            start = shoulder
-            for link_idx in range(4):
-                angle += joints[arm_idx, link_idx]
-                end = start + self.link_lengths[arm_idx, link_idx] * np.array([np.cos(angle), np.sin(angle)])
-                points.append(end)
-                start = end
-            arms.append(np.vstack(points))
-        return arms
+        shoulders = jnp.array([x, y]) + self.arm_offsets @ rot.T
 
-    def link_polygons(self, state: np.ndarray) -> list[np.ndarray]:
-        polygons = []
-        for arm_idx, arm in enumerate(self.arm_polylines(state)):
-            for link_idx, (start, end) in enumerate(zip(arm[:-1], arm[1:])):
-                tangent = end - start
-                norm = np.linalg.norm(tangent)
-                if norm < 1e-8:
-                    continue
-                normal = np.array([-tangent[1], tangent[0]]) / norm
-                half_width = 0.5 * self.link_widths[arm_idx, link_idx]
-                offset = half_width * normal
-                polygons.append(np.vstack((start - offset, end - offset, end + offset, start + offset)))
-        return polygons
+        def arm_points(shoulder, arm_joints, lengths):
+            angles = theta + jnp.cumsum(arm_joints)
+            directions = jnp.stack((jnp.cos(angles), jnp.sin(angles)), axis=1)
+            displacements = lengths[:, None] * directions
+            endpoints = shoulder[None, :] + jnp.cumsum(displacements, axis=0)
+            return jnp.vstack((shoulder[None, :], endpoints))
 
-    def draw(self, ax, state: np.ndarray, **kwargs) -> None:
+        return jax.vmap(arm_points)(shoulders, joints, self.link_lengths)
+
+    def link_polygons(self, state: jnp.ndarray) -> jnp.ndarray:
+        arms = self.arm_polylines(state)
+        starts = arms[:, :-1, :]
+        ends = arms[:, 1:, :]
+        tangents = ends - starts
+        norms = jnp.maximum(jnp.linalg.norm(tangents, axis=2), 1e-8)
+        normals = jnp.stack((-tangents[:, :, 1], tangents[:, :, 0]), axis=2) / norms[:, :, None]
+        offsets = 0.5 * self.link_widths[:, :, None] * normals
+        polygons = jnp.stack((starts - offsets, ends - offsets, ends + offsets, starts + offsets), axis=2)
+        return polygons.reshape((-1, 4, 2))
+
+    def draw(self, ax, state: jnp.ndarray, **kwargs) -> None:
         color = kwargs.pop("color", "tab:orange")
         edgecolor = kwargs.pop("edgecolor", "black")
-        ax.add_patch(Polygon(self.base_polygon(state), closed=True, facecolor=color, edgecolor=edgecolor, alpha=0.55, **kwargs))
-        for polygon in self.link_polygons(state):
+        ax.add_patch(
+            Polygon(
+                np.asarray(self.base_polygon(state), dtype=float),
+                closed=True,
+                facecolor=color,
+                edgecolor=edgecolor,
+                alpha=0.55,
+                **kwargs,
+            )
+        )
+        for polygon in np.asarray(self.link_polygons(state), dtype=float):
             ax.add_patch(
                 Polygon(polygon, closed=True, facecolor="tab:orange", edgecolor=edgecolor, alpha=0.78, linewidth=0.8)
             )
-        for arm in self.arm_polylines(state):
+        for arm in np.asarray(self.arm_polylines(state), dtype=float):
             ax.plot(arm[:, 0], arm[:, 1], linewidth=3.0, color="tab:orange", solid_capstyle="round")
             ax.scatter(arm[:-1, 0], arm[:-1, 1], s=26, color="white", edgecolor=edgecolor, zorder=5)
             ax.scatter(arm[-1:, 0], arm[-1:, 1], s=34, marker="s", color="tab:red", edgecolor=edgecolor, zorder=6)
 
     @staticmethod
-    def _rot(theta: float) -> np.ndarray:
-        return np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
+    def _rot(theta) -> jnp.ndarray:
+        return jnp.array([[jnp.cos(theta), -jnp.sin(theta)], [jnp.sin(theta), jnp.cos(theta)]])
 
     @staticmethod
-    def _sample_polygon_edges(polygon: np.ndarray, samples_per_edge: int) -> np.ndarray:
-        samples = []
+    def _sample_polygon_edges(polygon: jnp.ndarray, samples_per_edge: int) -> jnp.ndarray:
         count = max(2, int(samples_per_edge))
-        for start, end in zip(polygon, np.roll(polygon, -1, axis=0)):
-            t = np.linspace(0.0, 1.0, count, endpoint=False)[:, None]
-            samples.append((1.0 - t) * start + t * end)
-        return np.vstack(samples)
+        starts = polygon
+        ends = jnp.roll(polygon, -1, axis=0)
+        t = jnp.linspace(0.0, 1.0, count, endpoint=False, dtype=polygon.dtype)
+        samples = (1.0 - t[None, :, None]) * starts[:, None, :] + t[None, :, None] * ends[:, None, :]
+        return samples.reshape((-1, 2))

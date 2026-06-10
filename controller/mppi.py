@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import partial
 from typing import Protocol
 
-import numpy as np
+from jax import config as jax_config
+
+jax_config.update("jax_enable_x64", True)
+
+import jax
+import jax.numpy as jnp
 
 from robots.base_robot import RobotModel
 from sdf.geometry import ObstacleField
@@ -13,10 +19,10 @@ ALGORITHMS = ("brmppi", "mppi", "penalty_mppi")
 
 
 class SignedDistanceModel(Protocol):
-    def signed_distance(self, points: np.ndarray) -> np.ndarray:
+    def signed_distance(self, points: jnp.ndarray) -> jnp.ndarray:
         ...
 
-    def distance_and_gradient(self, points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def distance_and_gradient(self, points: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
         ...
 
 
@@ -49,24 +55,24 @@ class MPPIConfig:
 
 @dataclass(frozen=True)
 class RolloutResult:
-    cost: float
-    states: np.ndarray
-    controls: np.ndarray
-    augmented_controls: np.ndarray
-    alpha_trace: np.ndarray
-    min_clearance: float
+    cost: jnp.ndarray
+    states: jnp.ndarray
+    controls: jnp.ndarray
+    augmented_controls: jnp.ndarray
+    alpha_trace: jnp.ndarray
+    min_clearance: jnp.ndarray
 
 
 @dataclass(frozen=True)
 class ProjectionProblem:
-    physical_desired: np.ndarray
-    alpha_desired: np.ndarray
-    z_desired: np.ndarray
-    a_matrix: np.ndarray
-    b_vector: np.ndarray
-    inverse_weight: np.ndarray
-    lower_bound: np.ndarray
-    upper_bound: np.ndarray
+    physical_desired: jnp.ndarray
+    alpha_desired: jnp.ndarray
+    z_desired: jnp.ndarray
+    a_matrix: jnp.ndarray
+    b_vector: jnp.ndarray
+    inverse_weight: jnp.ndarray
+    lower_bound: jnp.ndarray
+    upper_bound: jnp.ndarray
 
 
 class MPPIController:
@@ -89,11 +95,11 @@ class MPPIController:
         self.sdf_model = sdf_model or obstacle_field
         self.algo = algo
         self.config = config or MPPIConfig()
-        self.rng = np.random.default_rng(seed)
+        self.key = jax.random.PRNGKey(seed)
         self.num_barriers = len(obstacle_field.obstacles)
         self.augmented_control_dim = robot.control_dim + self.num_barriers if algo == "brmppi" else robot.control_dim
-        self.control_sequence = np.zeros((self.config.horizon, self.augmented_control_dim), dtype=float)
-        self.alpha_state = np.full(self.num_barriers, self.config.barrier_alpha, dtype=float)
+        self.control_sequence = jnp.zeros((self.config.horizon, self.augmented_control_dim), dtype=float)
+        self.alpha_state = jnp.full((self.num_barriers,), self.config.barrier_alpha, dtype=float)
         self.last_diagnostics: dict[str, object] = {}
 
     @property
@@ -102,226 +108,333 @@ class MPPIController:
             return "neural_sdf"
         return "analytic_sdf"
 
-    def command(self, state: np.ndarray, goal: np.ndarray) -> tuple[np.ndarray, dict[str, object]]:
-        nominal = self._nominal_augmented_control(state, goal)
-        if not np.any(self.control_sequence):
-            self.control_sequence[:] = nominal
+    def command(self, state: jnp.ndarray, goal: jnp.ndarray) -> tuple[jnp.ndarray, dict[str, object]]:
+        result = self._command_jit(
+            jnp.asarray(state, dtype=float),
+            jnp.asarray(goal, dtype=float),
+            self.control_sequence,
+            self.alpha_state,
+            self.key,
+        )
+        (
+            action,
+            updated_sequence,
+            alpha_next,
+            key_next,
+            costs,
+            min_clearances,
+            trajectories,
+            effective_physical,
+            effective_augmented,
+            alpha_traces,
+            weights,
+            projected_first,
+        ) = jax.block_until_ready(result)
 
-        candidates = self._sample_control_sequences(state, nominal)
-        effective_physical = np.zeros((self.config.samples, self.config.horizon, self.robot.control_dim), dtype=float)
-        effective_augmented = np.zeros_like(candidates)
-        alpha_traces = np.zeros((self.config.samples, self.config.horizon + 1, self.num_barriers), dtype=float)
-        trajectories = np.zeros((self.config.samples, self.config.horizon + 1, self.robot.state_dim), dtype=float)
-        costs = np.zeros(self.config.samples, dtype=float)
-        min_clearances = np.zeros(self.config.samples, dtype=float)
+        self.control_sequence = updated_sequence
+        self.alpha_state = alpha_next
+        self.key = key_next
 
-        for sample_idx in range(self.config.samples):
-            rollout = self._rollout(state, goal, candidates[sample_idx])
-            costs[sample_idx] = rollout.cost
-            effective_physical[sample_idx] = rollout.controls
-            effective_augmented[sample_idx] = rollout.augmented_controls
-            alpha_traces[sample_idx] = rollout.alpha_trace
-            trajectories[sample_idx] = rollout.states
-            min_clearances[sample_idx] = rollout.min_clearance
-
-        weights = self._weights(costs)
-        if self.algo == "brmppi":
-            updated = np.einsum("s,shm->hm", weights, candidates)
-            updated = self._clip_augmented_controls(updated)
-            action, alpha_next, projected_first = self._project_augmented_control(state, updated[0], self.alpha_state)
-            self.alpha_state = alpha_next.copy()
-        else:
-            updated = np.einsum("s,shm->hm", weights, effective_physical)
-            updated = self.robot.clip_controls(updated)
-            action = updated[0].copy()
-            projected_first = updated[0].copy()
-
-        self.control_sequence[:-1] = updated[1:]
-        self.control_sequence[-1] = updated[-1]
-
-        best_idx = int(np.argmin(costs))
+        best_idx = int(jax.device_get(jnp.argmin(costs)))
+        sampled_collision_count = int(jax.device_get(jnp.count_nonzero(min_clearances < 0.0)))
         plot_count = min(self.config.plot_samples, self.config.samples)
+        weighted_alpha_terminal = (
+            jnp.einsum("s,sn->n", weights, alpha_traces[:, -1, :])
+            if self.algo == "brmppi"
+            else jnp.array([], dtype=float)
+        )
         diagnostics: dict[str, object] = {
             "barrier_source": self.barrier_source,
-            "best_cost": float(costs[best_idx]),
-            "mean_cost": float(np.mean(costs)),
-            **self._rollout_safety_diagnostics(min_clearances, weights, best_idx),
+            "best_cost": float(jax.device_get(costs[best_idx])),
+            "mean_cost": float(jax.device_get(jnp.mean(costs))),
+            "best_min_clearance": float(jax.device_get(min_clearances[best_idx])),
+            "best_collision": bool(jax.device_get(min_clearances[best_idx] < 0.0)),
+            "sampled_min_clearance": float(jax.device_get(jnp.min(min_clearances))),
+            "sampled_collision_count": sampled_collision_count,
+            "sampled_collision_fraction": float(sampled_collision_count / self.config.samples),
+            "weighted_min_clearance": float(jax.device_get(jnp.sum(weights * min_clearances))),
             "sampled_costs": costs.copy(),
             "sampled_min_clearances": min_clearances.copy(),
             "best_trajectory": trajectories[best_idx],
             "best_controls": effective_physical[best_idx],
             "best_augmented_controls": effective_augmented[best_idx],
             "best_alpha_trace": alpha_traces[best_idx],
-            "weighted_alpha_terminal": np.einsum("s,sn->n", weights, alpha_traces[:, -1, :]) if self.algo == "brmppi" else np.array([]),
+            "weighted_alpha_terminal": weighted_alpha_terminal,
             "projected_first_augmented": projected_first,
             "sampled_trajectories": trajectories[:plot_count],
         }
         self.last_diagnostics = diagnostics
         return action, diagnostics
 
-    def _nominal_augmented_control(self, state: np.ndarray, goal: np.ndarray) -> np.ndarray:
+    @partial(jax.jit, static_argnums=(0,))
+    def _command_jit(
+        self,
+        state: jnp.ndarray,
+        goal: jnp.ndarray,
+        control_sequence: jnp.ndarray,
+        alpha_state: jnp.ndarray,
+        key: jax.Array,
+    ) -> tuple[jnp.ndarray, ...]:
+        nominal = self._nominal_augmented_control_jax(state, goal)
+        nominal_sequence = jnp.tile(nominal[None, :], (self.config.horizon, 1))
+        sequence_is_fresh = jnp.logical_not(jnp.any(control_sequence != 0.0))
+        base_sequence = jnp.where(sequence_is_fresh, nominal_sequence, control_sequence)
+
+        candidates, key_next = self._sample_control_sequences_jax(base_sequence, key)
+        rollout_fn = lambda controls: self._rollout_jax(state, goal, controls, alpha_state)
+        (
+            costs,
+            trajectories,
+            effective_physical,
+            effective_augmented,
+            alpha_traces,
+            min_clearances,
+        ) = jax.vmap(rollout_fn)(candidates)
+
+        weights = self._weights_jax(costs)
+        if self.algo == "brmppi":
+            updated = jnp.einsum("s,shm->hm", weights, candidates)
+            updated = self._clip_augmented_controls_jax(updated)
+            action, alpha_next, projected_first = self._project_augmented_control_jax(state, updated[0], alpha_state)
+        else:
+            updated = jnp.einsum("s,shm->hm", weights, effective_physical)
+            updated = self.robot.clip_controls(updated)
+            action = updated[0]
+            alpha_next = alpha_state
+            projected_first = updated[0]
+
+        updated_sequence = jnp.concatenate((updated[1:], updated[-1:]), axis=0)
+        return (
+            action,
+            updated_sequence,
+            alpha_next,
+            key_next,
+            costs,
+            min_clearances,
+            trajectories,
+            effective_physical,
+            effective_augmented,
+            alpha_traces,
+            weights,
+            projected_first,
+        )
+
+    def _nominal_augmented_control(self, state: jnp.ndarray, goal: jnp.ndarray) -> jnp.ndarray:
+        return self._nominal_augmented_control_jax(jnp.asarray(state, dtype=float), jnp.asarray(goal, dtype=float))
+
+    def _nominal_augmented_control_jax(self, state: jnp.ndarray, goal: jnp.ndarray) -> jnp.ndarray:
         physical = self.robot.nominal_control(state, goal)
         if self.algo != "brmppi":
             return physical
-        alpha_rate = -self.config.alpha_rate_bound * np.ones(self.num_barriers, dtype=float)
-        return np.concatenate((physical, alpha_rate))
+        alpha_rate = -self.config.alpha_rate_bound * jnp.ones(self.num_barriers, dtype=float)
+        return jnp.concatenate((physical, alpha_rate))
 
-    def _sample_control_sequences(self, state: np.ndarray, _nominal: np.ndarray) -> np.ndarray:
+    def _sample_control_sequences_jax(self, base_sequence: jnp.ndarray, key: jax.Array) -> tuple[jnp.ndarray, jax.Array]:
         cfg = self.config
+        key_next, noise_key = jax.random.split(key)
         if self.algo == "brmppi":
-            bounds = self._augmented_control_bounds()
+            bounds = self._augmented_control_bounds_jax()
             physical_sigma = cfg.noise_scale * (self.robot.control_bounds[:, 1] - self.robot.control_bounds[:, 0])
             alpha_sigma = cfg.alpha_noise_scale * (bounds[self.robot.control_dim :, 1] - bounds[self.robot.control_dim :, 0])
-            sigma = np.concatenate((physical_sigma, alpha_sigma))
+            sigma = jnp.concatenate((physical_sigma, alpha_sigma))
         else:
             bounds = self.robot.control_bounds
             sigma = cfg.noise_scale * (bounds[:, 1] - bounds[:, 0])
-        noise = self.rng.normal(0.0, sigma, size=(cfg.samples, cfg.horizon, self.augmented_control_dim))
 
-        base = self.control_sequence.copy()
-        candidates = base[None, :, :] + noise
-        candidates[0] = base
+        noise = jax.random.normal(
+            noise_key,
+            shape=(cfg.samples, cfg.horizon, self.augmented_control_dim),
+            dtype=base_sequence.dtype,
+        ) * sigma
+        candidates = base_sequence[None, :, :] + noise
+        candidates = candidates.at[0].set(base_sequence)
         if self.algo == "brmppi":
-            return self._clip_augmented_controls(candidates)
-        return self.robot.clip_controls(candidates)
+            return self._clip_augmented_controls_jax(candidates), key_next
+        return self.robot.clip_controls(candidates), key_next
 
-    def _weights(self, costs: np.ndarray) -> np.ndarray:
-        shifted = costs - np.min(costs)
+    def _weights(self, costs: jnp.ndarray) -> jnp.ndarray:
+        return self._weights_jax(jnp.asarray(costs, dtype=float))
+
+    def _weights_jax(self, costs: jnp.ndarray) -> jnp.ndarray:
+        shifted = costs - jnp.min(costs)
         scaled = -shifted / max(self.config.temperature, 1e-6)
-        scaled = np.clip(scaled, -60.0, 0.0)
-        weights = np.exp(scaled)
-        total = np.sum(weights)
-        if not np.isfinite(total) or total <= 0.0:
-            return np.ones_like(costs) / costs.size
-        return weights / total
+        scaled = jnp.clip(scaled, -60.0, 0.0)
+        weights = jnp.exp(scaled)
+        total = jnp.sum(weights)
+        fallback = jnp.ones_like(costs) / costs.size
+        normalized = weights / total
+        return jnp.where(jnp.isfinite(total) & (total > 0.0), normalized, fallback)
 
-    def _rollout(self, state: np.ndarray, goal: np.ndarray, controls: np.ndarray) -> RolloutResult:
+    def _rollout(self, state: jnp.ndarray, goal: jnp.ndarray, controls: jnp.ndarray) -> RolloutResult:
+        cost, states, effective_controls, effective_augmented, alpha_trace, min_clearance = self._rollout_jax(
+            jnp.asarray(state, dtype=float),
+            jnp.asarray(goal, dtype=float),
+            jnp.asarray(controls, dtype=float),
+            self.alpha_state,
+        )
+        return RolloutResult(cost, states, effective_controls, effective_augmented, alpha_trace, min_clearance)
+
+    def _rollout_jax(
+        self,
+        state: jnp.ndarray,
+        goal: jnp.ndarray,
+        controls: jnp.ndarray,
+        initial_alpha: jnp.ndarray,
+    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
         cfg = self.config
-        x = state.copy()
-        alpha = self.alpha_state.copy()
-        states = np.zeros((cfg.horizon + 1, self.robot.state_dim), dtype=float)
-        alpha_trace = np.zeros((cfg.horizon + 1, self.num_barriers), dtype=float)
-        effective_controls = np.zeros((cfg.horizon, self.robot.control_dim), dtype=float)
-        effective_augmented = np.zeros((cfg.horizon, self.augmented_control_dim), dtype=float)
-        states[0] = x
-        if self.algo == "brmppi":
-            alpha_trace[0] = alpha
-        cost = 0.0
-        min_clearance = self._clearance(x)
+        initial_clearance = self._clearance_jax(state)
+        initial_cost = jnp.array(0.0, dtype=float)
+        initial_carry = (state, initial_alpha, initial_cost, initial_clearance)
 
-        for t in range(cfg.horizon):
-            u = controls[t].copy()
+        def step_scan(carry, desired_control):
+            x, alpha, cost, min_clearance = carry
             if self.algo == "brmppi":
-                u, alpha, projected_augmented = self._project_augmented_control(x, u, alpha)
-                effective_augmented[t] = projected_augmented
-                alpha_trace[t + 1] = alpha
+                u, alpha_next, projected_augmented = self._project_augmented_control_jax(x, desired_control, alpha)
+            else:
+                u = desired_control
+                alpha_next = alpha
+                projected_augmented = desired_control
 
             x_next = self.robot.step(x, u, cfg.dt)
-            h_next = self._clearance(x_next)
-            min_clearance = min(min_clearance, h_next)
-
-            goal_error = np.linalg.norm(self.robot.position(x_next) - goal)
-            cost += cfg.goal_weight * goal_error**2
-            cost += cfg.control_weight * float(np.dot(u, u))
+            h_next = self._clearance_jax(x_next)
+            goal_error = jnp.linalg.norm(self.robot.position(x_next) - goal)
+            running_cost = cfg.goal_weight * goal_error**2
+            running_cost += cfg.control_weight * jnp.dot(u, u)
 
             if self.algo == "penalty_mppi":
-                cost += self._safety_cost(h_next)
+                running_cost += self._safety_cost_jax(h_next)
+                running_cost += jnp.where(
+                    h_next < 0.0,
+                    cfg.collision_weight * (1.0 + jnp.abs(h_next)) ** 2,
+                    0.0,
+                )
             elif self.algo == "brmppi":
-                cost += self._barrier_alpha_cost(x, alpha)
-                cost += self._br_safety_cost(h_next)
+                running_cost += self._barrier_alpha_cost_jax(x, alpha_next)
+                running_cost += self._br_safety_cost_jax(h_next)
 
-            if self.algo == "penalty_mppi" and h_next < 0.0:
-                cost += cfg.collision_weight * (1.0 + abs(h_next)) ** 2
+            next_carry = (x_next, alpha_next, cost + running_cost, jnp.minimum(min_clearance, h_next))
+            return next_carry, (x_next, u, projected_augmented, alpha_next)
 
-            effective_controls[t] = u
-            if self.algo != "brmppi":
-                effective_augmented[t] = u
-            states[t + 1] = x_next
-            x = x_next
-
-        final_error = np.linalg.norm(self.robot.position(x) - goal)
-        cost += cfg.final_goal_weight * final_error**2
-        return RolloutResult(
-            cost=float(cost),
-            states=states,
-            controls=effective_controls,
-            augmented_controls=effective_augmented,
-            alpha_trace=alpha_trace,
-            min_clearance=float(min_clearance),
+        (x_final, _alpha_final, running_cost, min_clearance), outputs = jax.lax.scan(
+            step_scan,
+            initial_carry,
+            controls,
         )
+        states_next, effective_controls, effective_augmented, alpha_nexts = outputs
+        states = jnp.concatenate((state[None, :], states_next), axis=0)
+        if self.algo == "brmppi":
+            alpha_trace = jnp.concatenate((initial_alpha[None, :], alpha_nexts), axis=0)
+        else:
+            alpha_trace = jnp.zeros((cfg.horizon + 1, self.num_barriers), dtype=float)
+        final_error = jnp.linalg.norm(self.robot.position(x_final) - goal)
+        total_cost = running_cost + cfg.final_goal_weight * final_error**2
+        return total_cost, states, effective_controls, effective_augmented, alpha_trace, min_clearance
 
     def _rollout_safety_diagnostics(
         self,
-        min_clearances: np.ndarray,
-        weights: np.ndarray,
+        min_clearances: jnp.ndarray,
+        weights: jnp.ndarray,
         best_idx: int,
     ) -> dict[str, float | bool | int]:
-        sampled_collision_count = int(np.count_nonzero(min_clearances < 0.0))
+        sampled_collision_count = int(jax.device_get(jnp.count_nonzero(min_clearances < 0.0)))
         return {
-            "best_min_clearance": float(min_clearances[best_idx]),
-            "best_collision": bool(min_clearances[best_idx] < 0.0),
-            "sampled_min_clearance": float(np.min(min_clearances)),
+            "best_min_clearance": float(jax.device_get(min_clearances[best_idx])),
+            "best_collision": bool(jax.device_get(min_clearances[best_idx] < 0.0)),
+            "sampled_min_clearance": float(jax.device_get(jnp.min(min_clearances))),
             "sampled_collision_count": sampled_collision_count,
             "sampled_collision_fraction": float(sampled_collision_count / self.config.samples),
-            "weighted_min_clearance": float(np.sum(weights * min_clearances)),
+            "weighted_min_clearance": float(jax.device_get(jnp.sum(weights * min_clearances))),
         }
 
     def _safety_cost(self, clearance: float) -> float:
+        return float(jax.device_get(self._safety_cost_jax(jnp.asarray(clearance, dtype=float))))
+
+    def _safety_cost_jax(self, clearance: jnp.ndarray) -> jnp.ndarray:
         margin = 0.75
-        if clearance >= margin:
-            return 0.0
-        if clearance <= 0.0:
-            return self.config.safety_weight * (margin - clearance) ** 2 + self.config.collision_weight
-        return self.config.safety_weight * (margin - clearance) ** 2
+        cost = self.config.safety_weight * (margin - clearance) ** 2
+        collision_cost = cost + self.config.collision_weight
+        return jnp.where(clearance >= margin, 0.0, jnp.where(clearance <= 0.0, collision_cost, cost))
 
     def _br_safety_cost(self, clearance: float) -> float:
-        margin = self.config.br_clearance_margin
-        if clearance >= margin:
-            return 0.0
-        cost = self.config.br_clearance_weight * (margin - clearance) ** 2
-        if clearance <= 0.0:
-            cost += self.config.br_collision_weight * (1.0 + abs(clearance)) ** 2
-        return float(cost)
+        return float(jax.device_get(self._br_safety_cost_jax(jnp.asarray(clearance, dtype=float))))
 
-    def _clearance(self, state: np.ndarray) -> float:
+    def _br_safety_cost_jax(self, clearance: jnp.ndarray) -> jnp.ndarray:
+        margin = self.config.br_clearance_margin
+        cost = self.config.br_clearance_weight * (margin - clearance) ** 2
+        cost = cost + jnp.where(
+            clearance <= 0.0,
+            self.config.br_collision_weight * (1.0 + jnp.abs(clearance)) ** 2,
+            0.0,
+        )
+        return jnp.where(clearance >= margin, 0.0, cost)
+
+    def _clearance(self, state: jnp.ndarray) -> float:
+        return float(jax.device_get(self._clearance_jax(jnp.asarray(state, dtype=float))))
+
+    def _clearance_jax(self, state: jnp.ndarray) -> jnp.ndarray:
         points = self.robot.body_points(state)
         distances = self.obstacle_field.signed_distance(points)
-        return float(np.min(distances) - self.robot.body_point_radius)
+        return jnp.min(distances) - self.robot.body_point_radius
 
-    def _barrier_values(self, state: np.ndarray) -> np.ndarray:
+    def _barrier_values(self, state: jnp.ndarray) -> jnp.ndarray:
+        return self._barrier_values_jax(jnp.asarray(state, dtype=float))
+
+    def _barrier_values_jax(self, state: jnp.ndarray) -> jnp.ndarray:
         if hasattr(self.sdf_model, "obstacle_barriers"):
-            return np.asarray(self.sdf_model.obstacle_barriers(state, self.obstacle_field), dtype=float)
-        return self._analytic_obstacle_barriers(state)
+            return jnp.asarray(self.sdf_model.obstacle_barriers(state, self.obstacle_field), dtype=float)
+        return self._analytic_obstacle_barriers_jax(state)
 
-    def _analytic_obstacle_barriers(self, state: np.ndarray) -> np.ndarray:
+    def _analytic_obstacle_barriers(self, state: jnp.ndarray) -> jnp.ndarray:
+        return self._analytic_obstacle_barriers_jax(jnp.asarray(state, dtype=float))
+
+    def _analytic_obstacle_barriers_jax(self, state: jnp.ndarray) -> jnp.ndarray:
         points = self.robot.body_points(state)
-        centers = np.vstack([obs.center for obs in self.obstacle_field.obstacles])
-        radii = np.array([obs.radius for obs in self.obstacle_field.obstacles])
-        distances = np.linalg.norm(points[:, None, :] - centers[None, :, :], axis=2) - radii[None, :]
-        return np.min(distances, axis=0) - self.robot.body_point_radius
+        centers = self.obstacle_field.centers
+        radii = self.obstacle_field.radii
+        distances = jnp.linalg.norm(points[:, None, :] - centers[None, :, :], axis=2) - radii[None, :]
+        return jnp.min(distances, axis=0) - self.robot.body_point_radius
 
-    def _barrier_alpha_cost(self, state: np.ndarray, alpha: np.ndarray) -> float:
+    def _barrier_alpha_cost(self, state: jnp.ndarray, alpha: jnp.ndarray) -> float:
+        return float(
+            jax.device_get(
+                self._barrier_alpha_cost_jax(jnp.asarray(state, dtype=float), jnp.asarray(alpha, dtype=float))
+            )
+        )
+
+    def _barrier_alpha_cost_jax(self, state: jnp.ndarray, alpha: jnp.ndarray) -> jnp.ndarray:
+        if self.num_barriers == 0:
+            return jnp.array(0.0, dtype=float)
         cfg = self.config
-        h = self._projection_barrier_values(state)
-        if h.size == 0:
-            return 0.0
-        hmin_idx = int(np.argmin(h))
-        hmin = float(h[hmin_idx])
-        if hmin <= 0.0 or hmin >= cfg.barrier_buffer_distance:
-            return 0.0
-        return float(cfg.barrier_alpha_cost_weight * alpha[hmin_idx] / max(hmin, 0.01))
+        h = self._projection_barrier_values_jax(state)
+        hmin_idx = jnp.argmin(h)
+        hmin = h[hmin_idx]
+        alpha_hmin = alpha[hmin_idx]
+        cost = cfg.barrier_alpha_cost_weight * alpha_hmin / jnp.maximum(hmin, 0.01)
+        return jnp.where((hmin <= 0.0) | (hmin >= cfg.barrier_buffer_distance), 0.0, cost)
 
     def _project_augmented_control(
         self,
-        state: np.ndarray,
-        augmented_control: np.ndarray,
-        alpha: np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        problem = self._projection_problem(state, augmented_control, alpha)
-        if problem.a_matrix.size == 0:
+        state: jnp.ndarray,
+        augmented_control: jnp.ndarray,
+        alpha: jnp.ndarray,
+    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+        return self._project_augmented_control_jax(
+            jnp.asarray(state, dtype=float),
+            jnp.asarray(augmented_control, dtype=float),
+            jnp.asarray(alpha, dtype=float),
+        )
+
+    def _project_augmented_control_jax(
+        self,
+        state: jnp.ndarray,
+        augmented_control: jnp.ndarray,
+        alpha: jnp.ndarray,
+    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+        problem = self._projection_problem_jax(state, augmented_control, alpha)
+        if self.num_barriers == 0:
             return problem.physical_desired, problem.alpha_desired, problem.z_desired
 
-        projected = self._closed_form_projection(
+        projected = self._closed_form_projection_jax(
             problem.z_desired,
             problem.a_matrix,
             problem.b_vector,
@@ -329,61 +442,67 @@ class MPPIController:
             problem.lower_bound,
             problem.upper_bound,
         )
-        projected = self._repair_projected_control_bounds(projected, problem.a_matrix, problem.b_vector)
-        return (
-            projected[: self.robot.control_dim].copy(),
-            projected[self.robot.control_dim :].copy(),
-            projected,
-        )
+        projected = self._repair_projected_control_bounds_jax(projected, problem.a_matrix, problem.b_vector)
+        return projected[: self.robot.control_dim], projected[self.robot.control_dim :], projected
 
     def _projection_problem(
         self,
-        state: np.ndarray,
-        augmented_control: np.ndarray,
-        alpha: np.ndarray,
+        state: jnp.ndarray,
+        augmented_control: jnp.ndarray,
+        alpha: jnp.ndarray,
+    ) -> ProjectionProblem:
+        return self._projection_problem_jax(
+            jnp.asarray(state, dtype=float),
+            jnp.asarray(augmented_control, dtype=float),
+            jnp.asarray(alpha, dtype=float),
+        )
+
+    def _projection_problem_jax(
+        self,
+        state: jnp.ndarray,
+        augmented_control: jnp.ndarray,
+        alpha: jnp.ndarray,
     ) -> ProjectionProblem:
         cfg = self.config
         physical_desired = self.robot.clip_control(augmented_control[: self.robot.control_dim])
-        alpha_rate = np.clip(
+        alpha_rate = jnp.clip(
             augmented_control[self.robot.control_dim :],
             -cfg.alpha_rate_bound,
             cfg.alpha_rate_bound,
         )
-        alpha_desired = np.clip(
+        alpha_desired = jnp.clip(
             alpha + alpha_rate * cfg.dt,
             -cfg.alpha_state_bound,
             cfg.alpha_state_bound,
         )
-        z_desired = np.concatenate((physical_desired, alpha_desired))
-        h = self._projection_barrier_values_with_margin(state)
-        if h.size == 0:
-            empty_rows = np.zeros((0, self.augmented_control_dim), dtype=float)
-            lower, upper = self._projection_bounds()
+        z_desired = jnp.concatenate((physical_desired, alpha_desired))
+        lower, upper = self._projection_bounds_jax()
+        inverse_weight = jnp.concatenate(
+            (
+                jnp.ones(self.robot.control_dim, dtype=float),
+                cfg.alpha_projection_inverse_weight * jnp.ones(self.num_barriers, dtype=float),
+            )
+        )
+        if self.num_barriers == 0:
             return ProjectionProblem(
                 physical_desired=physical_desired,
                 alpha_desired=alpha_desired,
                 z_desired=z_desired,
-                a_matrix=empty_rows,
-                b_vector=np.zeros(0, dtype=float),
-                inverse_weight=np.ones(self.augmented_control_dim, dtype=float),
+                a_matrix=jnp.zeros((0, self.augmented_control_dim), dtype=float),
+                b_vector=jnp.zeros(0, dtype=float),
+                inverse_weight=inverse_weight,
                 lower_bound=lower,
                 upper_bound=upper,
             )
 
-        barrier_jacobian = self._projection_barrier_jacobian(state)
+        h = self._projection_barrier_values_with_margin_jax(state)
+        barrier_jacobian = self._projection_barrier_jacobian_jax(state)
         drift = self.robot.drift(state)
         control_matrix = self.robot.control_matrix(state)
-        a_matrix = np.zeros((h.size, self.augmented_control_dim), dtype=float)
-        a_matrix[:, : self.robot.control_dim] = barrier_jacobian @ control_matrix
-        a_matrix[:, self.robot.control_dim :] = np.diag(h)
+        physical_block = barrier_jacobian @ control_matrix
+        alpha_block = jnp.diag(h)
+        a_matrix = jnp.concatenate((physical_block, alpha_block), axis=1)
         b_vector = -(barrier_jacobian @ drift)
-        inverse_weight = np.concatenate(
-            (
-                np.ones(self.robot.control_dim, dtype=float),
-                cfg.alpha_projection_inverse_weight * np.ones(self.num_barriers, dtype=float),
-            )
-        )
-        lower, upper = self._projection_bounds()
         return ProjectionProblem(
             physical_desired=physical_desired,
             alpha_desired=alpha_desired,
@@ -395,159 +514,229 @@ class MPPIController:
             upper_bound=upper,
         )
 
-    def _projection_barrier_jacobian(self, state: np.ndarray) -> np.ndarray:
-        h_base = self._projection_barrier_values_with_margin(state)
-        jacobian = np.zeros((h_base.size, self.robot.state_dim), dtype=float)
+    def _projection_barrier_jacobian(self, state: jnp.ndarray) -> jnp.ndarray:
+        return self._projection_barrier_jacobian_jax(jnp.asarray(state, dtype=float))
+
+    def _projection_barrier_jacobian_jax(self, state: jnp.ndarray) -> jnp.ndarray:
+        h_base = self._projection_barrier_values_with_margin_jax(state)
         eps = 1e-4
-        for state_idx in range(self.robot.state_dim):
-            perturbed = state.copy()
-            perturbed[state_idx] += eps
-            h_eps = self._projection_barrier_values_with_margin(perturbed)
-            jacobian[:, state_idx] = (h_eps - h_base) / eps
-        return jacobian
+        perturbations = eps * jnp.eye(self.robot.state_dim, dtype=float)
+        diff_fn = lambda delta: (self._projection_barrier_values_with_margin_jax(state + delta) - h_base) / eps
+        return jax.vmap(diff_fn)(perturbations).T
 
-    def _projection_barrier_values(self, state: np.ndarray) -> np.ndarray:
+    def _projection_barrier_values(self, state: jnp.ndarray) -> jnp.ndarray:
+        return self._projection_barrier_values_jax(jnp.asarray(state, dtype=float))
+
+    def _projection_barrier_values_jax(self, state: jnp.ndarray) -> jnp.ndarray:
         barrier_state = self.robot.projection_barrier_state(state, self.config.dt)
-        return self._barrier_values(barrier_state)
+        return self._barrier_values_jax(barrier_state)
 
-    def _projection_barrier_values_with_margin(self, state: np.ndarray) -> np.ndarray:
-        return self._projection_barrier_values(state) - self.config.barrier_projection_margin
+    def _projection_barrier_values_with_margin(self, state: jnp.ndarray) -> jnp.ndarray:
+        return self._projection_barrier_values_with_margin_jax(jnp.asarray(state, dtype=float))
+
+    def _projection_barrier_values_with_margin_jax(self, state: jnp.ndarray) -> jnp.ndarray:
+        return self._projection_barrier_values_jax(state) - self.config.barrier_projection_margin
 
     def _closed_form_projection(
         self,
-        z_des: np.ndarray,
-        a_matrix: np.ndarray,
-        b_vector: np.ndarray,
-        inverse_weight_diag: np.ndarray,
-        lower: np.ndarray,
-        upper: np.ndarray,
-    ) -> np.ndarray:
-        if a_matrix.size == 0:
-            return z_des.copy()
+        z_des: jnp.ndarray,
+        a_matrix: jnp.ndarray,
+        b_vector: jnp.ndarray,
+        inverse_weight_diag: jnp.ndarray,
+        lower: jnp.ndarray,
+        upper: jnp.ndarray,
+    ) -> jnp.ndarray:
+        return self._closed_form_projection_jax(
+            jnp.asarray(z_des, dtype=float),
+            jnp.asarray(a_matrix, dtype=float),
+            jnp.asarray(b_vector, dtype=float),
+            jnp.asarray(inverse_weight_diag, dtype=float),
+            jnp.asarray(lower, dtype=float),
+            jnp.asarray(upper, dtype=float),
+        )
 
+    def _closed_form_projection_jax(
+        self,
+        z_des: jnp.ndarray,
+        a_matrix: jnp.ndarray,
+        b_vector: jnp.ndarray,
+        inverse_weight_diag: jnp.ndarray,
+        lower: jnp.ndarray,
+        upper: jnp.ndarray,
+    ) -> jnp.ndarray:
         rho = max(0.0, self.config.bound_penalty)
         if rho > 0.0:
-            weight_diag = 1.0 / np.maximum(inverse_weight_diag, 1e-9)
+            weight_diag = 1.0 / jnp.maximum(inverse_weight_diag, 1e-9)
             m_diag = weight_diag + rho
             m_inv_diag = 1.0 / m_diag
             p = weight_diag * z_des + 0.5 * rho * (lower + upper)
             am_inv = a_matrix * m_inv_diag[None, :]
             rhs = am_inv @ p - b_vector
-            correction = self._solve_projection_system(a_matrix, rhs, m_inv_diag)
+            correction = self._solve_projection_system_jax(a_matrix, rhs, m_inv_diag)
             return m_inv_diag * (p - a_matrix.T @ correction)
 
-        return self._unbounded_closed_form_projection(z_des, a_matrix, b_vector, inverse_weight_diag)
+        return self._unbounded_closed_form_projection_jax(z_des, a_matrix, b_vector, inverse_weight_diag)
 
     def _unbounded_closed_form_projection(
         self,
-        z_des: np.ndarray,
-        a_matrix: np.ndarray,
-        b_vector: np.ndarray,
-        inverse_weight_diag: np.ndarray,
-    ) -> np.ndarray:
-        if a_matrix.size == 0:
-            return z_des.copy()
+        z_des: jnp.ndarray,
+        a_matrix: jnp.ndarray,
+        b_vector: jnp.ndarray,
+        inverse_weight_diag: jnp.ndarray,
+    ) -> jnp.ndarray:
+        return self._unbounded_closed_form_projection_jax(
+            jnp.asarray(z_des, dtype=float),
+            jnp.asarray(a_matrix, dtype=float),
+            jnp.asarray(b_vector, dtype=float),
+            jnp.asarray(inverse_weight_diag, dtype=float),
+        )
+
+    def _unbounded_closed_form_projection_jax(
+        self,
+        z_des: jnp.ndarray,
+        a_matrix: jnp.ndarray,
+        b_vector: jnp.ndarray,
+        inverse_weight_diag: jnp.ndarray,
+    ) -> jnp.ndarray:
         weighted_a_t = inverse_weight_diag[:, None] * a_matrix.T
         rhs = b_vector - a_matrix @ z_des
-        lagrange = self._solve_projection_system(a_matrix, rhs, inverse_weight_diag)
+        lagrange = self._solve_projection_system_jax(a_matrix, rhs, inverse_weight_diag)
         return z_des + weighted_a_t @ lagrange
 
     def _solve_projection_system(
         self,
-        a_matrix: np.ndarray,
-        rhs: np.ndarray,
-        inverse_diag: np.ndarray,
-    ) -> np.ndarray:
-        if self._has_single_alpha_per_row(a_matrix):
-            return self._solve_diagonal_plus_low_rank(a_matrix, rhs, inverse_diag)
+        a_matrix: jnp.ndarray,
+        rhs: jnp.ndarray,
+        inverse_diag: jnp.ndarray,
+    ) -> jnp.ndarray:
+        return self._solve_projection_system_jax(
+            jnp.asarray(a_matrix, dtype=float),
+            jnp.asarray(rhs, dtype=float),
+            jnp.asarray(inverse_diag, dtype=float),
+        )
+
+    def _solve_projection_system_jax(
+        self,
+        a_matrix: jnp.ndarray,
+        rhs: jnp.ndarray,
+        inverse_diag: jnp.ndarray,
+    ) -> jnp.ndarray:
+        if self._has_single_alpha_per_row_static():
+            return self._solve_diagonal_plus_low_rank_jax(a_matrix, rhs, inverse_diag)
 
         lhs = a_matrix @ (inverse_diag[:, None] * a_matrix.T)
-        try:
-            return np.linalg.solve(lhs + 1e-8 * np.eye(lhs.shape[0]), rhs)
-        except np.linalg.LinAlgError:
-            return np.linalg.pinv(lhs) @ rhs
+        return self._solve_with_pinv_fallback(lhs + 1e-8 * jnp.eye(lhs.shape[0], dtype=float), rhs, lhs)
 
-    def _has_single_alpha_per_row(self, a_matrix: np.ndarray) -> bool:
-        control_dim = self.robot.control_dim
-        if self.algo != "brmppi":
-            return False
-        if a_matrix.shape[1] != control_dim + self.num_barriers:
-            return False
-        alpha_block = a_matrix[:, control_dim:]
-        return bool(np.all(np.count_nonzero(np.abs(alpha_block) > 1e-12, axis=1) <= 1))
+    def _has_single_alpha_per_row(self, a_matrix: jnp.ndarray) -> bool:
+        return self._has_single_alpha_per_row_static()
+
+    def _has_single_alpha_per_row_static(self) -> bool:
+        return self.algo == "brmppi" and self.num_barriers > 0
 
     def _solve_diagonal_plus_low_rank(
         self,
-        a_matrix: np.ndarray,
-        rhs: np.ndarray,
-        inverse_diag: np.ndarray,
-    ) -> np.ndarray:
+        a_matrix: jnp.ndarray,
+        rhs: jnp.ndarray,
+        inverse_diag: jnp.ndarray,
+    ) -> jnp.ndarray:
+        return self._solve_diagonal_plus_low_rank_jax(
+            jnp.asarray(a_matrix, dtype=float),
+            jnp.asarray(rhs, dtype=float),
+            jnp.asarray(inverse_diag, dtype=float),
+        )
+
+    def _solve_diagonal_plus_low_rank_jax(
+        self,
+        a_matrix: jnp.ndarray,
+        rhs: jnp.ndarray,
+        inverse_diag: jnp.ndarray,
+    ) -> jnp.ndarray:
         control_dim = self.robot.control_dim
         au = a_matrix[:, :control_dim]
         alpha_block = a_matrix[:, control_dim:]
-        inv_u = np.maximum(inverse_diag[:control_dim], 1e-12)
-        inv_alpha = np.maximum(inverse_diag[control_dim:], 1e-12)
+        inv_u = jnp.maximum(inverse_diag[:control_dim], 1e-12)
+        inv_alpha = jnp.maximum(inverse_diag[control_dim:], 1e-12)
         diag_terms = (alpha_block**2) @ inv_alpha + 1e-8
         diag_inv = 1.0 / diag_terms
         diag_inv_au = diag_inv[:, None] * au
-        small_lhs = np.diag(1.0 / inv_u) + au.T @ diag_inv_au
+        small_lhs = jnp.diag(1.0 / inv_u) + au.T @ diag_inv_au
         small_rhs = au.T @ (diag_inv * rhs)
-        try:
-            small_solution = np.linalg.solve(small_lhs, small_rhs)
-        except np.linalg.LinAlgError:
-            small_solution = np.linalg.pinv(small_lhs) @ small_rhs
+        small_solution = self._solve_with_pinv_fallback(small_lhs, small_rhs, small_lhs)
         return diag_inv * rhs - diag_inv_au @ small_solution
+
+    def _solve_with_pinv_fallback(self, solve_lhs: jnp.ndarray, rhs: jnp.ndarray, pinv_lhs: jnp.ndarray) -> jnp.ndarray:
+        solution = jnp.linalg.solve(solve_lhs, rhs)
+        fallback = jnp.linalg.pinv(pinv_lhs) @ rhs
+        return jnp.where(jnp.all(jnp.isfinite(solution)), solution, fallback)
 
     def _repair_projected_control_bounds(
         self,
-        projected: np.ndarray,
-        a_matrix: np.ndarray,
-        b_vector: np.ndarray,
-    ) -> np.ndarray:
+        projected: jnp.ndarray,
+        a_matrix: jnp.ndarray,
+        b_vector: jnp.ndarray,
+    ) -> jnp.ndarray:
+        return self._repair_projected_control_bounds_jax(
+            jnp.asarray(projected, dtype=float),
+            jnp.asarray(a_matrix, dtype=float),
+            jnp.asarray(b_vector, dtype=float),
+        )
+
+    def _repair_projected_control_bounds_jax(
+        self,
+        projected: jnp.ndarray,
+        a_matrix: jnp.ndarray,
+        b_vector: jnp.ndarray,
+    ) -> jnp.ndarray:
         control_dim = self.robot.control_dim
         control_lower = self.robot.control_bounds[:, 0]
         control_upper = self.robot.control_bounds[:, 1]
-        bounded_control = np.clip(projected[:control_dim], control_lower, control_upper)
-        if np.allclose(bounded_control, projected[:control_dim], rtol=0.0, atol=1e-10):
-            return projected
+        bounded_control = jnp.clip(projected[:control_dim], control_lower, control_upper)
+        changed = jnp.any(jnp.abs(bounded_control - projected[:control_dim]) > 1e-10)
 
-        repaired = projected.copy()
-        repaired[:control_dim] = bounded_control
         alpha_block = a_matrix[:, control_dim:]
         alpha_rhs = b_vector - a_matrix[:, :control_dim] @ bounded_control
-        repaired_alpha = repaired[control_dim:]
-        for row_idx, row in enumerate(alpha_block):
-            alpha_columns = np.flatnonzero(np.abs(row) > 1e-8)
-            if alpha_columns.size != 1:
-                continue
-            alpha_col = int(alpha_columns[0])
-            repaired_alpha[alpha_col] = alpha_rhs[row_idx] / row[alpha_col]
-        return repaired
+        alpha_diag = jnp.diag(alpha_block)
+        repaired_alpha = jnp.where(
+            jnp.abs(alpha_diag) > 1e-8,
+            alpha_rhs / alpha_diag,
+            projected[control_dim:],
+        )
+        repaired = jnp.concatenate((bounded_control, repaired_alpha))
+        return jnp.where(changed, repaired, projected)
 
-    def _augmented_control_bounds(self) -> np.ndarray:
-        alpha_bounds = np.column_stack(
+    def _augmented_control_bounds(self) -> jnp.ndarray:
+        return self._augmented_control_bounds_jax()
+
+    def _augmented_control_bounds_jax(self) -> jnp.ndarray:
+        alpha_bounds = jnp.column_stack(
             (
-                -self.config.alpha_rate_bound * np.ones(self.num_barriers),
-                self.config.alpha_rate_bound * np.ones(self.num_barriers),
+                -self.config.alpha_rate_bound * jnp.ones(self.num_barriers, dtype=float),
+                self.config.alpha_rate_bound * jnp.ones(self.num_barriers, dtype=float),
             )
         )
-        return np.vstack((self.robot.control_bounds, alpha_bounds))
+        return jnp.vstack((self.robot.control_bounds, alpha_bounds))
 
-    def _projection_bounds(self) -> tuple[np.ndarray, np.ndarray]:
-        lower = np.concatenate(
+    def _projection_bounds(self) -> tuple[jnp.ndarray, jnp.ndarray]:
+        return self._projection_bounds_jax()
+
+    def _projection_bounds_jax(self) -> tuple[jnp.ndarray, jnp.ndarray]:
+        lower = jnp.concatenate(
             (
                 self.robot.control_bounds[:, 0],
-                -self.config.alpha_state_bound * np.ones(self.num_barriers),
+                -self.config.alpha_state_bound * jnp.ones(self.num_barriers, dtype=float),
             )
         )
-        upper = np.concatenate(
+        upper = jnp.concatenate(
             (
                 self.robot.control_bounds[:, 1],
-                self.config.alpha_state_bound * np.ones(self.num_barriers),
+                self.config.alpha_state_bound * jnp.ones(self.num_barriers, dtype=float),
             )
         )
         return lower, upper
 
-    def _clip_augmented_controls(self, controls: np.ndarray) -> np.ndarray:
-        bounds = self._augmented_control_bounds()
-        return np.clip(controls, bounds[:, 0], bounds[:, 1])
+    def _clip_augmented_controls(self, controls: jnp.ndarray) -> jnp.ndarray:
+        return self._clip_augmented_controls_jax(jnp.asarray(controls, dtype=float))
+
+    def _clip_augmented_controls_jax(self, controls: jnp.ndarray) -> jnp.ndarray:
+        bounds = self._augmented_control_bounds_jax()
+        return jnp.clip(controls, bounds[:, 0], bounds[:, 1])
