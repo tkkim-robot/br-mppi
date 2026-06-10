@@ -75,7 +75,21 @@ Choose the controller:
 uv run python examples/basic_demo.py --algo brmppi
 uv run python examples/basic_demo.py --algo mppi
 uv run python examples/basic_demo.py --algo penalty_mppi
+uv run python examples/basic_demo.py --algo mppi_cbf
+uv run python examples/basic_demo.py --algo shield_mppi
+uv run python examples/basic_demo.py --algo sc_mppi
+uv run python examples/basic_demo.py --algo gs_mppi
 ```
+
+The MPPI-family safety baselines are:
+
+- `mppi`: vanilla MPPI with goal and control-effort costs.
+- `penalty_mppi`: vanilla MPPI plus soft clearance/collision penalties.
+- `mppi_cbf`: vanilla MPPI followed by a CBF-QP safety filter on the executed action.
+- `shield_mppi`: Shield-MPPI style baseline. Rollouts use ordinary sampled MPPI controls, add a discrete-time CBF violation cost `C max(alpha h(x_k) - h(x_{k+1}), 0)`, then run a fixed-step JAX gradient repair on the first controls of the MPPI-updated sequence before executing the repaired first control.
+- `sc_mppi`: SC-MPPI baseline with a finite-horizon `computeSafeFeedback(x0, U)` path. It embeds inverse barrier state `beta = B(h(x))`, rolls out an augmented `[x, beta]` reference trajectory, computes DBaS/iLQR-style feedback gains from trajectory linearization and a Riccati backward pass, and samples with `u_sample = U_safe + noise + K_BaS (xbar - xbar_ref)`.
+- `gs_mppi`: GS-MPPI / MPPI-CBF style baseline. It builds a scalar soft-min composite CBF, rolls out the closed-form minimum-intervention safe control, updates the desired-control sequence from desired-control samples, and executes the closed-form safe version of the best sampled desired control. The implementation uses one planning time step rather than the paper's optional finer inner safety loop. It also clips the closed-form control to actuator bounds; that clipping can break the CBF inequality, so the paper's formal safety guarantee is not retained under clipping.
+- `brmppi`: barrier-rate MPPI with sampled alpha rates and the closed-form BR projection.
 
 Choose the robot:
 
@@ -123,6 +137,8 @@ The demo uses robot-specific default horizons so the BR-MPPI sample cloud visibl
 The default scene uses a larger random-looking circular obstacle field inspired by the BR-MPPI paper's branching-rollout illustration. A straight-line path from start to goal intersects obstacles for every robot, and the useful trajectories snake through clutter with obstacles on both sides instead of bypassing the field along open edges. The mobile-arm demo uses an even larger workspace with its own obstacle field because its fixed footprint is much larger. The green transparent lines are the MPPI sample cloud and the dashed blue line is the best sampled rollout at the current step.
 
 The BR-MPPI implementation samples augmented controls `[u, alpha_dot]`, carries one class-K rate state per obstacle, projects each rollout control with the original closed-form weighted equality projection `A z = b`, and uses the mobile-arm nearest-barrier buffer cost `alpha_min / h_min`. The projection rows follow the original `mobile_arm` structure: `A = [dh/dx g(x), diag(h)]` and `b = -dh/dx f(x)`, with `dh/dx` finite-differenced so the same path works for analytic and neural-SDF barriers. Single-integrator and unicycle-style models use the immediate barrier state, while relative-degree-2 models use the same 5-step derived/lookahead barrier idea as `mobile_arm`: dynamic unicycle projects from a short future pose and planar quadrotor projects from `position + velocity * 5dt`. A small explicit projection margin tightens the obstacle barrier to absorb first-order discretization error. When a projected physical control reaches an actuator bound, the implementation recomputes the alpha components analytically so the bounded control still satisfies the BR equality rows. The BR rollout cost also adds a clearance shaping term and hard collision penalty so collided rollouts are strongly disfavored without changing the projection mechanism.
+
+All CBF/barrier baselines use the same h-function, projection margin, finite-difference Jacobian, and relative-degree lookahead state as BR-MPPI. The `mppi_cbf` baseline solves the linearized CBF row `dh/dx (f(x) + g(x)u) + alpha h(x) >= 0` with actuator bounds as a small box-constrained QP in JAX. `shield_mppi`, `sc_mppi`, and `gs_mppi` intentionally do not use that generic rollout QP path: Shield uses DCBF rollout penalties plus local sequence repair, SC uses finite-horizon embedded-barrier-state feedback during sampling, and GS uses a composite CBF with closed-form minimum-intervention safe control. The `gs_cbf_residual_after_clipping` diagnostic reports any post-clipping violation of the composite-CBF inequality.
 
 Each run prints three safety diagnostics: executed trajectory clearance, minimum sampled-rollout clearance, and minimum best-rollout clearance. Collided samples can still appear in the MPPI population because sampling remains stochastic, but the selected best rollout should stay collision-free when the cost tuning is working.
 
