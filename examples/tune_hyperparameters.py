@@ -3,10 +3,15 @@ from __future__ import annotations
 import argparse
 from dataclasses import asdict, fields
 import json
+import os
 from pathlib import Path
 import sys
 import time
 from typing import Any
+
+# Hyperparameter tuning is intended for the overnight GPU machine. Request the
+# CUDA backend before importing the controller stack, which imports JAX.
+os.environ.setdefault("JAX_PLATFORMS", "cuda")
 
 import numpy as np
 import optuna
@@ -31,6 +36,9 @@ from controller import ALGORITHMS, MPPIConfig
 from random_benchmark import ROBOT_DEFAULTS, random_obstacle_field, run_trial, summarize_results
 from robots import ROBOT_REGISTRY, create_robot
 
+import jax
+import jax.numpy as jnp
+
 
 CONFIG_FIELD_NAMES = {field.name for field in fields(MPPIConfig)}
 ALGORITHMS_WITH_SPECIFIC_TUNING = {
@@ -41,6 +49,7 @@ ALGORITHMS_WITH_SPECIFIC_TUNING = {
     "sc_mppi",
     "gs_mppi",
 }
+SC_MPPI_DEFAULT_MAX_OPTUNA_TRIALS = 10
 
 
 def parse_args() -> argparse.Namespace:
@@ -48,6 +57,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--algo", choices=ALGORITHMS, default="brmppi")
     parser.add_argument("--robot", "--dynamics", choices=tuple(sorted(ROBOT_REGISTRY)), default="unicycle")
     parser.add_argument("--optuna-trials", type=int, default=100, help="Number of Optuna hyperparameter trials.")
+    parser.add_argument(
+        "--sc-mppi-max-optuna-trials",
+        type=int,
+        default=SC_MPPI_DEFAULT_MAX_OPTUNA_TRIALS,
+        help="Default cap on Optuna trials for SC-MPPI only; other algorithms are unchanged.",
+    )
     parser.add_argument("--benchmark-trials", type=int, default=100, help="Random obstacle trials per Optuna trial.")
     parser.add_argument("--final-eval-trials", type=int, default=100, help="Benchmark trials for final best-config table.")
     parser.add_argument("--final-eval", action=argparse.BooleanOptionalAction, default=True)
@@ -87,6 +102,13 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.algo == "sc_mppi" and args.optuna_trials > args.sc_mppi_max_optuna_trials:
+        print(
+            f"Clamping SC-MPPI Optuna trials from {args.optuna_trials} to "
+            f"{args.sc_mppi_max_optuna_trials}.",
+            flush=True,
+        )
+        args.optuna_trials = args.sc_mppi_max_optuna_trials
     args.output_dir.mkdir(parents=True, exist_ok=True)
     defaults = ROBOT_DEFAULTS[args.robot]
     max_steps = args.max_steps or defaults["max_steps"]
@@ -96,7 +118,13 @@ def main() -> None:
     storage = args.storage or f"sqlite:///{args.output_dir / (study_name + '.db')}"
     tune_shared = args.tune_shared if args.tune_shared is not None else (args.algo == "brmppi" or args.fixed_config is None)
     base_config = load_base_config(args, defaults)
-    run = init_wandb(args, study_name, base_config, tune_shared)
+    jax_runtime = require_cuda_runtime()
+    print(
+        "jax_runtime="
+        + " ".join(f"{key}={value}" for key, value in jax_runtime.items()),
+        flush=True,
+    )
+    run = init_wandb(args, study_name, base_config, tune_shared, jax_runtime)
 
     optimizer = HyperparameterOptimizer(
         args=args,
@@ -195,20 +223,22 @@ class HyperparameterOptimizer:
         trial.set_user_attr("results", [asdict(result) for result in results])
         trial_record = {
             "trial_number": trial.number,
+            "state": "COMPLETE",
+            "benchmark_trials_completed": len(results),
+            "benchmark_trials_requested": self.args.benchmark_trials,
             "params": trial.params,
             "config": config_to_dict(config),
             "metrics": metrics,
         }
         self.completed_results.append(trial_record)
-        if self.wandb_run is not None:
-            wandb.log(
-                {
-                    "trial_number": trial.number,
-                    **metrics,
-                    **{f"param/{key}": value for key, value in trial.params.items()},
-                },
-                step=trial.number,
-            )
+        self.log_trial_to_wandb(
+            trial=trial,
+            config=config,
+            metrics=metrics,
+            trial_state="complete",
+            benchmark_trials_completed=len(results),
+            benchmark_trials_requested=self.args.benchmark_trials,
+        )
         print(
             f"trial={trial.number:03d} score={metrics['objective_score']:.5f} "
             f"success={metrics['success_rate']:.3f} collision={metrics['collision_rate']:.3f} "
@@ -271,15 +301,77 @@ class HyperparameterOptimizer:
                 partial_metrics = objective_metrics(results, config.dt, self.max_steps)
                 optuna_trial.report(partial_metrics["objective_score"], step=benchmark_idx + 1)
                 if optuna_trial.should_prune():
+                    full_denominator_metrics = objective_metrics(
+                        results,
+                        config.dt,
+                        self.max_steps,
+                        denominator=benchmark_trials,
+                    )
+                    optuna_trial.set_user_attr("metrics", full_denominator_metrics)
+                    optuna_trial.set_user_attr("observed_metrics", partial_metrics)
+                    optuna_trial.set_user_attr("config", config_to_dict(config))
+                    optuna_trial.set_user_attr("results", [asdict(result) for result in results])
+                    trial_record = {
+                        "trial_number": optuna_trial.number,
+                        "state": "PRUNED",
+                        "benchmark_trials_completed": benchmark_idx + 1,
+                        "benchmark_trials_requested": benchmark_trials,
+                        "params": optuna_trial.params,
+                        "config": config_to_dict(config),
+                        "metrics": full_denominator_metrics,
+                        "observed_metrics": partial_metrics,
+                    }
+                    self.completed_results.append(trial_record)
+                    self.log_trial_to_wandb(
+                        trial=optuna_trial,
+                        config=config,
+                        metrics=full_denominator_metrics,
+                        trial_state="pruned",
+                        benchmark_trials_completed=benchmark_idx + 1,
+                        benchmark_trials_requested=benchmark_trials,
+                        observed_metrics=partial_metrics,
+                    )
                     print(
                         f"trial={optuna_trial.number:03d} pruned after {benchmark_idx + 1} "
                         f"benchmark trials with score={partial_metrics['objective_score']:.8f} "
                         f"success={partial_metrics['success_rate']:.3f} "
+                        f"full_denominator_success={full_denominator_metrics['success_rate']:.3f} "
                         f"collision={partial_metrics['collision_rate']:.3f}",
                         flush=True,
                     )
                     raise optuna.TrialPruned()
         return results
+
+    def log_trial_to_wandb(
+        self,
+        *,
+        trial: optuna.Trial,
+        config: MPPIConfig,
+        metrics: dict[str, float],
+        trial_state: str,
+        benchmark_trials_completed: int,
+        benchmark_trials_requested: int,
+        observed_metrics: dict[str, float] | None = None,
+    ) -> None:
+        if self.wandb_run is None:
+            return
+        payload: dict[str, Any] = {
+            "trial_number": trial.number,
+            "trial_complete": int(trial_state == "complete"),
+            "trial_pruned": int(trial_state == "pruned"),
+            "benchmark_trials_completed": benchmark_trials_completed,
+            "benchmark_trials_requested": benchmark_trials_requested,
+            **metrics,
+            **{f"param/{key}": value for key, value in trial.params.items()},
+            **{
+                f"config/{key}": value
+                for key, value in config_to_dict(config).items()
+                if isinstance(value, (int, float, bool, str))
+            },
+        }
+        if observed_metrics is not None:
+            payload.update({f"observed/{key}": value for key, value in observed_metrics.items()})
+        wandb.log(payload, step=trial.number)
 
 
 def suggest_shared_params(
@@ -378,8 +470,9 @@ def suggest_algo_params(trial: optuna.Trial, algo: str, base: MPPIConfig) -> dic
     return {}
 
 
-def objective_metrics(results: list, dt: float, max_steps: int) -> dict[str, float]:
-    total = max(len(results), 1)
+def objective_metrics(results: list, dt: float, max_steps: int, *, denominator: int | None = None) -> dict[str, float]:
+    observed_total = max(len(results), 1)
+    total = max(denominator or observed_total, observed_total)
     successes = sum(result.reached for result in results)
     collisions = sum(result.collision for result in results)
     timeouts = sum(result.timeout for result in results)
@@ -411,10 +504,10 @@ def objective_metrics(results: list, dt: float, max_steps: int) -> dict[str, flo
         "timeout_penalty": timeout_penalty,
         "travel_bonus": travel_bonus,
         "avg_success_time": avg_success_time,
-        "mean_steps": sum(result.steps for result in results) / total,
-        "mean_command_ms": sum(result.mean_command_ms for result in results) / total,
-        "mean_final_error": sum(result.final_error for result in results) / total,
-        "worst_min_clearance": min(result.min_exact_clearance for result in results),
+        "mean_steps": sum(result.steps for result in results) / observed_total,
+        "mean_command_ms": sum(result.mean_command_ms for result in results) / observed_total,
+        "mean_final_error": sum(result.final_error for result in results) / observed_total,
+        "worst_min_clearance": min(result.min_exact_clearance for result in results) if results else float("inf"),
     }
 
 
@@ -445,7 +538,39 @@ def create_sampler(args: argparse.Namespace):
     return TPESampler(seed=args.seed, multivariate=True)
 
 
-def init_wandb(args: argparse.Namespace, study_name: str, base_config: MPPIConfig, tune_shared: bool):
+def require_cuda_runtime() -> dict[str, Any]:
+    try:
+        gpu_devices = jax.devices("gpu")
+    except RuntimeError as exc:
+        raise RuntimeError(
+            "JAX CUDA backend is required for tuning. Install a CUDA-enabled JAX build "
+            'with `uv pip install "jax[cuda12]"` and verify `jax.devices()` shows a GPU.'
+        ) from exc
+    if not gpu_devices:
+        raise RuntimeError("JAX CUDA backend is required for tuning, but no GPU devices were found.")
+
+    probe = jax.jit(lambda value: (value @ value).sum())(jnp.ones((64, 64), dtype=jnp.float32))
+    jax.block_until_ready(probe)
+    probe_devices = tuple(probe.devices())
+    if not probe_devices or probe_devices[0].platform != "gpu":
+        raise RuntimeError(f"JAX probe did not execute on GPU; probe devices were {probe_devices!r}.")
+
+    return {
+        "default_backend": jax.default_backend(),
+        "device_count": len(gpu_devices),
+        "devices": ", ".join(str(device) for device in gpu_devices),
+        "device_kinds": ", ".join(sorted({device.device_kind for device in gpu_devices})),
+        "probe_device": str(probe_devices[0]),
+    }
+
+
+def init_wandb(
+    args: argparse.Namespace,
+    study_name: str,
+    base_config: MPPIConfig,
+    tune_shared: bool,
+    jax_runtime: dict[str, Any],
+):
     if not args.wandb or args.wandb_mode == "disabled":
         return None
     if wandb is None:
@@ -459,11 +584,13 @@ def init_wandb(args: argparse.Namespace, study_name: str, base_config: MPPIConfi
             "algo": args.algo,
             "robot": args.robot,
             "optuna_trials": args.optuna_trials,
+            "sc_mppi_max_optuna_trials": args.sc_mppi_max_optuna_trials,
             "benchmark_trials": args.benchmark_trials,
             "seed": args.seed,
             "controller_seed": args.controller_seed,
             "tune_shared": tune_shared,
             "base_config": config_to_dict(base_config),
+            "jax_runtime": jax_runtime,
         },
     )
 

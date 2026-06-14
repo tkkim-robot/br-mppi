@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from controller import MPPIConfig, MPPIController
+from controller import ALGORITHMS, MPPIConfig, MPPIController, load_tuned_config
 from robots import ROBOT_REGISTRY, create_robot
 from sdf import default_obstacle_field
 
@@ -19,18 +19,46 @@ from sdf import default_obstacle_field
 SAFETY_BASELINES = ("mppi_cbf", "shield_mppi", "sc_mppi", "gs_mppi")
 
 
+def small_tuned_config(algo: str, **overrides):
+    return load_tuned_config(
+        "single_integrator",
+        algo,
+        overrides={
+            "horizon": 2,
+            "samples": 3,
+            "dt": 0.1,
+            "plot_samples": 0,
+            **overrides,
+        },
+    )
+
+
+def small_test_config(robot_name: str, algo: str, **overrides):
+    if robot_name == "single_integrator":
+        return small_tuned_config(algo, **overrides)
+    return MPPIConfig(
+        horizon=2,
+        samples=3,
+        dt=0.1,
+        plot_samples=0,
+        **overrides,
+    )
+
+
+def test_tuned_single_integrator_configs_cover_all_algorithms() -> None:
+    for algo in ALGORITHMS:
+        config = load_tuned_config("single_integrator", algo)
+        assert config.horizon > 0
+        assert config.samples > 0
+        assert config.plot_samples == 0
+
+
 @pytest.mark.parametrize("algo", SAFETY_BASELINES)
 @pytest.mark.parametrize("robot_name", tuple(sorted(ROBOT_REGISTRY)))
 def test_cbf_baseline_runs_one_jax_command_for_each_robot(algo: str, robot_name: str) -> None:
     robot = create_robot(robot_name)
     field = default_obstacle_field(robot.name)
-    config = MPPIConfig(
-        horizon=2,
-        samples=3,
-        dt=0.1,
-        plot_samples=0,
-        cbf_qp_iterations=12,
-    )
+    config = small_test_config(robot_name, algo, cbf_qp_iterations=12)
     controller = MPPIController(robot, field, algo=algo, config=config, seed=7)
 
     action, diagnostics = controller.command(robot.default_state, robot.default_goal)
@@ -48,7 +76,7 @@ def test_cbf_baseline_runs_one_jax_command_for_each_robot(algo: str, robot_name:
 def test_shield_mppi_uses_dcbf_rollout_cost_and_no_qp(monkeypatch: pytest.MonkeyPatch) -> None:
     robot = create_robot("single_integrator")
     field = default_obstacle_field(robot.name)
-    config = MPPIConfig(horizon=1, samples=2, dt=0.4, plot_samples=0, shield_cbf_penalty_weight=100.0)
+    config = small_tuned_config("shield_mppi", horizon=1, samples=2, dt=0.4, shield_cbf_penalty_weight=100.0)
     shield = MPPIController(robot, field, algo="shield_mppi", config=config, seed=4)
     plain = MPPIController(robot, field, algo="mppi", config=config, seed=4)
 
@@ -75,11 +103,12 @@ def test_shield_mppi_uses_dcbf_rollout_cost_and_no_qp(monkeypatch: pytest.Monkey
 def test_shield_mppi_repair_does_not_increase_dcbf_violation() -> None:
     robot = create_robot("single_integrator")
     field = default_obstacle_field(robot.name)
-    config = MPPIConfig(
+    config = small_tuned_config(
+        "shield_mppi",
         horizon=4,
         samples=2,
         dt=0.25,
-        plot_samples=0,
+        shield_alpha=0.98,
         shield_repair_horizon=4,
         shield_repair_steps=12,
         shield_repair_step_size=0.08,
@@ -99,7 +128,7 @@ def test_shield_mppi_repair_does_not_increase_dcbf_violation() -> None:
 def test_sc_mppi_compute_safe_feedback_shapes_and_nonzero_gain() -> None:
     robot = create_robot("single_integrator")
     field = default_obstacle_field(robot.name)
-    config = MPPIConfig(horizon=3, samples=4, dt=0.2, plot_samples=0, sc_feedback_iterations=1)
+    config = small_tuned_config("sc_mppi", horizon=3, samples=4, dt=0.2, sc_feedback_iterations=1)
     sc = MPPIController(robot, field, algo="sc_mppi", config=config, seed=9)
     state = jnp.array([-7.15, -1.55], dtype=float)
     goal = jnp.array([7.0, 3.6], dtype=float)
@@ -119,7 +148,7 @@ def test_sc_mppi_compute_safe_feedback_shapes_and_nonzero_gain() -> None:
 def test_sc_mppi_sampling_uses_dbas_gain_not_qp(monkeypatch: pytest.MonkeyPatch) -> None:
     robot = create_robot("single_integrator")
     field = default_obstacle_field(robot.name)
-    config = MPPIConfig(horizon=2, samples=4, dt=0.2, plot_samples=0, sc_feedback_iterations=1)
+    config = small_tuned_config("sc_mppi", samples=4, dt=0.2, sc_feedback_iterations=1)
     sc = MPPIController(robot, field, algo="sc_mppi", config=config, seed=9)
     plain = MPPIController(robot, field, algo="mppi", config=config, seed=9)
     state = jnp.array([-7.15, -1.55], dtype=float)
@@ -154,7 +183,7 @@ def test_sc_mppi_sampling_uses_dbas_gain_not_qp(monkeypatch: pytest.MonkeyPatch)
 def test_gs_mppi_uses_composite_barrier_and_closed_form_control(monkeypatch: pytest.MonkeyPatch) -> None:
     robot = create_robot("single_integrator")
     field = default_obstacle_field(robot.name)
-    config = MPPIConfig(horizon=2, samples=3, dt=0.2, plot_samples=0)
+    config = small_tuned_config("gs_mppi", dt=0.2)
     controller = MPPIController(robot, field, algo="gs_mppi", config=config, seed=5)
 
     def forbidden_qp(*_args, **_kwargs):

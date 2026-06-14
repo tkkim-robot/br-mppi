@@ -9,6 +9,7 @@ dependencies = [
     "matplotlib>=3.8,<3.9",
     "jax>=0.5.3",
     "optuna>=4.2,<5",
+    "PyYAML>=6.0,<7",
     "wandb>=0.19,<1",
 ]
 

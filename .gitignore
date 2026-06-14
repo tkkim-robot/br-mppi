@@ -14,6 +14,7 @@ uv.lock
 
 output/
 outputs/
+wandb/
 Videos/
 *.mp4
 *.gif
