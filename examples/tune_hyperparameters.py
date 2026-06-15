@@ -33,7 +33,15 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from controller import ALGORITHMS, MPPIConfig
-from random_benchmark import ROBOT_DEFAULTS, random_obstacle_field, run_trial, summarize_results
+from random_benchmark import (
+    DEFAULT_DEADLOCK_POSITION_TOLERANCE,
+    DEFAULT_DEADLOCK_PROGRESS_TOLERANCE,
+    DEFAULT_DEADLOCK_WINDOW,
+    ROBOT_DEFAULTS,
+    random_obstacle_field,
+    run_trial,
+    summarize_results,
+)
 from robots import ROBOT_REGISTRY, create_robot
 
 import jax
@@ -77,6 +85,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--workspace-margin", type=float, default=2.5)
     parser.add_argument("--start-clearance", type=float, default=0.35)
     parser.add_argument("--goal-clearance", type=float, default=0.9)
+    parser.add_argument(
+        "--deadlock-window",
+        type=int,
+        default=DEFAULT_DEADLOCK_WINDOW,
+        help="Consecutive simulation steps used for deadlock timeout detection; 0 disables it.",
+    )
+    parser.add_argument(
+        "--deadlock-position-tolerance",
+        type=float,
+        default=DEFAULT_DEADLOCK_POSITION_TOLERANCE,
+        help="Maximum position span over the deadlock window before treating the trial as stuck.",
+    )
+    parser.add_argument(
+        "--deadlock-progress-tolerance",
+        type=float,
+        default=DEFAULT_DEADLOCK_PROGRESS_TOLERANCE,
+        help="Maximum goal-distance improvement over the deadlock window before treating the trial as stuck.",
+    )
     parser.add_argument("--fixed-config", type=Path, default=None, help="Best BR config JSON for baseline fine tuning.")
     parser.add_argument(
         "--tune-shared",
@@ -295,6 +321,9 @@ class HyperparameterOptimizer:
                 dt=config.dt,
                 warmup=self.args.warmup,
                 config=config,
+                deadlock_window=self.args.deadlock_window,
+                deadlock_position_tolerance=self.args.deadlock_position_tolerance,
+                deadlock_progress_tolerance=self.args.deadlock_progress_tolerance,
             )
             results.append(result)
             if report_pruning and optuna_trial is not None and (benchmark_idx + 1) % self.args.prune_interval == 0:
@@ -476,6 +505,7 @@ def objective_metrics(results: list, dt: float, max_steps: int, *, denominator: 
     successes = sum(result.reached for result in results)
     collisions = sum(result.collision for result in results)
     timeouts = sum(result.timeout for result in results)
+    deadlocks = sum(result.deadlock for result in results)
     success_times = [result.steps * dt for result in results if result.reached]
     max_time = max_steps * dt
     avg_success_time = sum(success_times) / len(success_times) if success_times else max_time
@@ -500,6 +530,7 @@ def objective_metrics(results: list, dt: float, max_steps: int, *, denominator: 
         "success_rate": success_rate,
         "collision_rate": collision_rate,
         "timeout_rate": timeout_rate,
+        "deadlock_rate": deadlocks / total,
         "collision_penalty": collision_penalty,
         "timeout_penalty": timeout_penalty,
         "travel_bonus": travel_bonus,
@@ -586,6 +617,9 @@ def init_wandb(
             "optuna_trials": args.optuna_trials,
             "sc_mppi_max_optuna_trials": args.sc_mppi_max_optuna_trials,
             "benchmark_trials": args.benchmark_trials,
+            "deadlock_window": args.deadlock_window,
+            "deadlock_position_tolerance": args.deadlock_position_tolerance,
+            "deadlock_progress_tolerance": args.deadlock_progress_tolerance,
             "seed": args.seed,
             "controller_seed": args.controller_seed,
             "tune_shared": tune_shared,
@@ -668,8 +702,8 @@ def write_final_markdown(args: argparse.Namespace, study: optuna.Study, best_con
         f"- Benchmark trials: `{len(results)}`",
         f"- JSON: `{benchmark_json}`",
         "",
-        "| dynamics | method | trials | reached | collisions | timeouts | success rate | collision rate | mean reach/trial steps | mean command ms | worst clearance |",
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| dynamics | method | trials | reached | collisions | timeouts | deadlocks | success rate | collision rate | mean reach/trial steps | mean command ms | worst clearance |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in summary:
         lines.append(
@@ -682,6 +716,7 @@ def write_final_markdown(args: argparse.Namespace, study: optuna.Study, best_con
                     str(row["reached"]),
                     str(row["collisions"]),
                     str(row["timeouts"]),
+                    str(row["deadlocks"]),
                     f"{float(row['success_rate']):.3f}",
                     f"{float(row['collision_rate']):.3f}",
                     f"{float(row['mean_steps']):.1f}",

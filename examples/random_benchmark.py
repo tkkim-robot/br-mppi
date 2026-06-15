@@ -27,6 +27,9 @@ ROBOT_DEFAULTS = {
     "planar_quadrotor": {"horizon": 36, "samples": 80, "max_steps": 900, "min_obstacles": 20, "max_obstacles": 20},
     "mobile_arm": {"horizon": 28, "samples": 96, "max_steps": 1000, "min_obstacles": 16, "max_obstacles": 16},
 }
+DEFAULT_DEADLOCK_WINDOW = 80
+DEFAULT_DEADLOCK_POSITION_TOLERANCE = 0.03
+DEFAULT_DEADLOCK_PROGRESS_TOLERANCE = 0.02
 
 
 @dataclass(frozen=True)
@@ -50,6 +53,10 @@ class TrialResult:
     mean_command_ms: float
     p95_command_ms: float
     wall_seconds: float
+    deadlock: bool = False
+    deadlock_window: int = 0
+    deadlock_position_tolerance: float = 0.0
+    deadlock_progress_tolerance: float = 0.0
 
 
 def parse_args() -> argparse.Namespace:
@@ -70,6 +77,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--workspace-margin", type=float, default=2.5)
     parser.add_argument("--start-clearance", type=float, default=0.35)
     parser.add_argument("--goal-clearance", type=float, default=0.9)
+    parser.add_argument(
+        "--deadlock-window",
+        type=int,
+        default=DEFAULT_DEADLOCK_WINDOW,
+        help="Consecutive simulation steps used for deadlock timeout detection; 0 disables it.",
+    )
+    parser.add_argument(
+        "--deadlock-position-tolerance",
+        type=float,
+        default=DEFAULT_DEADLOCK_POSITION_TOLERANCE,
+        help="Maximum position span over the deadlock window before treating the trial as stuck.",
+    )
+    parser.add_argument(
+        "--deadlock-progress-tolerance",
+        type=float,
+        default=DEFAULT_DEADLOCK_PROGRESS_TOLERANCE,
+        help="Maximum goal-distance improvement over the deadlock window before treating the trial as stuck.",
+    )
     parser.add_argument("--warmup", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--output", type=Path, default=None, help="JSON output path.")
@@ -117,6 +142,9 @@ def main() -> None:
                 max_steps=max_steps,
                 dt=args.dt,
                 warmup=args.warmup,
+                deadlock_window=args.deadlock_window,
+                deadlock_position_tolerance=args.deadlock_position_tolerance,
+                deadlock_progress_tolerance=args.deadlock_progress_tolerance,
             )
             results.append(result)
             if not args.quiet:
@@ -138,6 +166,9 @@ def main() -> None:
             "workspace_margin": args.workspace_margin,
             "start_clearance": args.start_clearance,
             "goal_clearance": args.goal_clearance,
+            "deadlock_window": args.deadlock_window,
+            "deadlock_position_tolerance": args.deadlock_position_tolerance,
+            "deadlock_progress_tolerance": args.deadlock_progress_tolerance,
             "warmup_excluded_from_timing": args.warmup,
         },
         "summary": summarize_results(results),
@@ -273,6 +304,9 @@ def run_trial(
     dt: float,
     warmup: bool,
     config: MPPIConfig | None = None,
+    deadlock_window: int = DEFAULT_DEADLOCK_WINDOW,
+    deadlock_position_tolerance: float = DEFAULT_DEADLOCK_POSITION_TOLERANCE,
+    deadlock_progress_tolerance: float = DEFAULT_DEADLOCK_PROGRESS_TOLERANCE,
 ) -> TrialResult:
     robot = create_robot(robot_name)
     controller_config = replace(config, plot_samples=0) if config is not None else MPPIConfig(
@@ -296,8 +330,11 @@ def run_trial(
     first_best_collision_step: int | None = None
     reached = False
     collision = min_exact_clearance < 0.0
+    deadlock = False
     steps_run = 0
     command_times: list[float] = []
+    position_history = [np.asarray(robot.position(state), dtype=float)]
+    goal_distance_history = [float(jnp.linalg.norm(robot.position(state) - robot.default_goal))]
     wall_start = time.perf_counter()
 
     for step_idx in range(max_steps):
@@ -321,13 +358,26 @@ def run_trial(
             first_best_collision_step = step_idx
 
         state = robot.step(state, action, dt)
+        position = np.asarray(robot.position(state), dtype=float)
+        goal_distance = float(jnp.linalg.norm(robot.position(state) - robot.default_goal))
+        position_history.append(position)
+        goal_distance_history.append(goal_distance)
         current_clearance = exact_clearance(field, robot, state)
         min_exact_clearance = min(min_exact_clearance, current_clearance)
         if current_clearance < 0.0:
             collision = True
             break
-        if float(jnp.linalg.norm(robot.position(state) - robot.default_goal)) <= robot.goal_tolerance:
+        if goal_distance <= robot.goal_tolerance:
             reached = True
+            break
+        if is_deadlocked(
+            position_history,
+            goal_distance_history,
+            deadlock_window=deadlock_window,
+            position_tolerance=deadlock_position_tolerance,
+            progress_tolerance=deadlock_progress_tolerance,
+        ):
+            deadlock = True
             break
 
     final_error = float(jnp.linalg.norm(robot.position(state) - robot.default_goal))
@@ -352,7 +402,28 @@ def run_trial(
         mean_command_ms=mean_ms,
         p95_command_ms=p95_ms,
         wall_seconds=time.perf_counter() - wall_start,
+        deadlock=deadlock,
+        deadlock_window=deadlock_window,
+        deadlock_position_tolerance=deadlock_position_tolerance,
+        deadlock_progress_tolerance=deadlock_progress_tolerance,
     )
+
+
+def is_deadlocked(
+    position_history: list[np.ndarray],
+    goal_distance_history: list[float],
+    *,
+    deadlock_window: int,
+    position_tolerance: float,
+    progress_tolerance: float,
+) -> bool:
+    if deadlock_window <= 0 or len(position_history) <= deadlock_window:
+        return False
+    recent_positions = np.asarray(position_history[-(deadlock_window + 1) :], dtype=float)
+    recent_goal_distances = goal_distance_history[-(deadlock_window + 1) :]
+    position_span = float(np.max(np.linalg.norm(recent_positions - recent_positions[0], axis=1)))
+    goal_progress = float(recent_goal_distances[0] - recent_goal_distances[-1])
+    return position_span <= position_tolerance and goal_progress <= progress_tolerance
 
 
 def reset_controller(controller: MPPIController, seed: int) -> None:
@@ -385,6 +456,7 @@ def summarize_results(results: list[TrialResult]) -> list[dict[str, float | int 
                 "reached": sum(result.reached for result in rows),
                 "collisions": sum(result.collision for result in rows),
                 "timeouts": sum(result.timeout for result in rows),
+                "deadlocks": sum(result.deadlock for result in rows),
                 "success_rate": sum(result.reached for result in rows) / count,
                 "collision_rate": sum(result.collision for result in rows) / count,
                 "mean_steps": sum(result.steps for result in rows) / count,
@@ -397,7 +469,7 @@ def summarize_results(results: list[TrialResult]) -> list[dict[str, float | int 
 
 
 def print_trial_result(result: TrialResult) -> None:
-    status = "reached" if result.reached else ("collision" if result.collision else "timeout")
+    status = "reached" if result.reached else ("collision" if result.collision else ("deadlock" if result.deadlock else "timeout"))
     print(
         f"trial={result.trial:03d} seed={result.field_seed} "
         f"algo={result.algo:12s} robot={result.robot:18s} status={status:9s} "
@@ -409,8 +481,8 @@ def print_trial_result(result: TrialResult) -> None:
 
 
 def print_summary(summary: list[dict[str, float | int | str]]) -> None:
-    print("algo | trials | reached | collisions | timeouts | success | collision | mean_ms | mean_steps | worst_clear")
-    print("--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---:")
+    print("algo | trials | reached | collisions | timeouts | deadlocks | success | collision | mean_ms | mean_steps | worst_clear")
+    print("--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---:")
     for row in summary:
         print(
             " | ".join(
@@ -420,6 +492,7 @@ def print_summary(summary: list[dict[str, float | int | str]]) -> None:
                     str(row["reached"]),
                     str(row["collisions"]),
                     str(row["timeouts"]),
+                    str(row["deadlocks"]),
                     f"{float(row['success_rate']):.3f}",
                     f"{float(row['collision_rate']):.3f}",
                     f"{float(row['mean_command_ms']):.2f}",
