@@ -1,0 +1,64 @@
+# Best Benchmark: unicycle / mppi_cbf
+
+- Study: `unicycle_mppi_cbf`
+- Best trial: `9`
+- Best objective: `0.115786`
+- Benchmark trials: `100`
+- JSON: `output/tuning/unicycle_mppi_cbf_best_benchmark.json`
+
+| dynamics | method | trials | reached | collisions | timeouts | deadlocks | success rate | collision rate | mean reach/trial steps | mean command ms | worst clearance |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| unicycle | mppi_cbf | 100 | 12 | 86 | 2 | 2 | 0.120 | 0.860 | 95.1 | 31.33 | -0.129 |
+
+## Best Config
+
+```json
+{
+  "horizon": 36,
+  "samples": 240,
+  "dt": 0.1,
+  "temperature": 0.5,
+  "noise_scale": 1.2,
+  "goal_weight": 2.0,
+  "final_goal_weight": 20.0,
+  "control_weight": 0.13,
+  "safety_weight": 18.0,
+  "collision_weight": 10000.0,
+  "barrier_alpha": 0.0,
+  "alpha_rate_bound": 30.0,
+  "alpha_state_bound": 5.0,
+  "alpha_noise_scale": 1.5,
+  "alpha_projection_inverse_weight": 0.2,
+  "bound_penalty": 0.1,
+  "barrier_buffer_distance": 0.24999999999999997,
+  "barrier_projection_margin": 0.02,
+  "barrier_alpha_cost_weight": 0.0,
+  "br_clearance_margin": 0.8,
+  "br_clearance_weight": 50.0,
+  "br_collision_weight": 100000.0,
+  "cbf_alpha": 1.7,
+  "cbf_qp_iterations": 75,
+  "cbf_qp_rho": 1.0,
+  "cbf_qp_regularization": 1e-08,
+  "shield_cbf_penalty_weight": 900.0,
+  "shield_alpha": 0.98,
+  "shield_repair_horizon": 6,
+  "shield_repair_steps": 8,
+  "shield_repair_step_size": 0.04,
+  "sc_barrier_eps": 0.001,
+  "sc_barrier_gamma": 0.25,
+  "sc_feedback_gain": 0.08,
+  "sc_feedback_clip": 0.7,
+  "sc_feedback_iterations": 1,
+  "sc_feedback_regularization": 0.0001,
+  "sc_beta_cost_weight": 8.0,
+  "sc_state_cost_weight": 0.05,
+  "sc_control_cost_weight": 0.08,
+  "sc_use_combined_barrier": true,
+  "gs_softmin_rho": 25.0,
+  "gs_closed_form_gamma": 2.0,
+  "gs_alpha": 1.0,
+  "gs_composite_margin": 0.0,
+  "plot_samples": 0
+}
+```
