@@ -11,21 +11,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from controller import ALGORITHMS, MPPIConfig, MPPIController, load_tuned_config
+from controller import ALGORITHMS, MPPIController, load_tuned_config
 from robots import ROBOT_REGISTRY, create_robot
 from sdf import default_obstacle_field
 
 
-SAFETY_BASELINES = ("mppi_cbf", "shield_mppi", "sc_mppi", "gs_mppi")
-
-
-TUNED_TEST_DYNAMICS = {
-    "dynamic_unicycle",
-    "mobile_arm",
-    "planar_quadrotor",
-    "single_integrator",
-    "unicycle",
-}
+TUNED_TEST_DYNAMICS = set(ROBOT_REGISTRY)
 
 
 def small_tuned_config(robot_name: str, algo: str, **overrides):
@@ -42,18 +33,6 @@ def small_tuned_config(robot_name: str, algo: str, **overrides):
     )
 
 
-def small_test_config(robot_name: str, algo: str, **overrides):
-    if robot_name in TUNED_TEST_DYNAMICS:
-        return small_tuned_config(robot_name, algo, **overrides)
-    return MPPIConfig(
-        horizon=2,
-        samples=3,
-        dt=0.1,
-        plot_samples=0,
-        **overrides,
-    )
-
-
 @pytest.mark.parametrize("robot_name", sorted(TUNED_TEST_DYNAMICS))
 def test_tuned_configs_cover_all_algorithms(robot_name: str) -> None:
     for algo in ALGORITHMS:
@@ -63,12 +42,13 @@ def test_tuned_configs_cover_all_algorithms(robot_name: str) -> None:
         assert config.plot_samples == 0
 
 
-@pytest.mark.parametrize("algo", SAFETY_BASELINES)
+@pytest.mark.parametrize("algo", ALGORITHMS)
 @pytest.mark.parametrize("robot_name", tuple(sorted(ROBOT_REGISTRY)))
-def test_cbf_baseline_runs_one_jax_command_for_each_robot(algo: str, robot_name: str) -> None:
+def test_algorithm_runs_one_jax_command_for_each_robot_with_tuned_config(algo: str, robot_name: str) -> None:
     robot = create_robot(robot_name)
     field = default_obstacle_field(robot.name)
-    config = small_test_config(robot_name, algo, cbf_qp_iterations=12)
+    tuned_config = load_tuned_config(robot_name, algo)
+    config = small_tuned_config(robot_name, algo, cbf_qp_iterations=12)
     controller = MPPIController(robot, field, algo=algo, config=config, seed=7)
 
     action, diagnostics = controller.command(robot.default_state, robot.default_goal)
@@ -76,6 +56,11 @@ def test_cbf_baseline_runs_one_jax_command_for_each_robot(algo: str, robot_name:
     assert isinstance(action, jax.Array)
     assert action.shape == (robot.control_dim,)
     assert bool(jnp.all(jnp.isfinite(action)))
+    assert config.temperature == tuned_config.temperature
+    assert config.noise_scale == tuned_config.noise_scale
+    assert config.goal_weight == tuned_config.goal_weight
+    assert config.final_goal_weight == tuned_config.final_goal_weight
+    assert config.control_weight == tuned_config.control_weight
     assert diagnostics["uses_cbf_qp"] is (algo == "mppi_cbf")
     assert diagnostics["uses_rollout_cbf_qp"] is False
     assert jnp.isfinite(jnp.asarray(diagnostics["cbf_qp_max_violation"]))
