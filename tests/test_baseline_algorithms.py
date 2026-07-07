@@ -19,7 +19,13 @@ from sdf import default_obstacle_field
 SAFETY_BASELINES = ("mppi_cbf", "shield_mppi", "sc_mppi", "gs_mppi")
 
 
-TUNED_TEST_DYNAMICS = {"dynamic_unicycle", "planar_quadrotor", "single_integrator", "unicycle"}
+TUNED_TEST_DYNAMICS = {
+    "dynamic_unicycle",
+    "mobile_arm",
+    "planar_quadrotor",
+    "single_integrator",
+    "unicycle",
+}
 
 
 def small_tuned_config(robot_name: str, algo: str, **overrides):

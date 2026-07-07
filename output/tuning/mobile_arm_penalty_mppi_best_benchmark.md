@@ -1,0 +1,64 @@
+# Best Benchmark: mobile_arm / penalty_mppi
+
+- Study: `mobile_arm_penalty_mppi`
+- Best trial: `13`
+- Best objective: `0.949804`
+- Benchmark trials: `100`
+- JSON: `output/tuning/mobile_arm_penalty_mppi_best_benchmark.json`
+
+| dynamics | method | trials | reached | collisions | timeouts | deadlocks | success rate | collision rate | mean reach/trial steps | mean command ms | worst clearance |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| mobile_arm | penalty_mppi | 100 | 95 | 4 | 1 | 0 | 0.950 | 0.040 | 237.9 | 94.86 | -0.114 |
+
+## Best Config
+
+```json
+{
+  "horizon": 36,
+  "samples": 240,
+  "dt": 0.1,
+  "temperature": 4.25,
+  "noise_scale": 1.2,
+  "goal_weight": 0.25,
+  "final_goal_weight": 24.0,
+  "control_weight": 0.12,
+  "safety_weight": 120.0,
+  "collision_weight": 10000.0,
+  "barrier_alpha": 0.4,
+  "alpha_rate_bound": 30.0,
+  "alpha_state_bound": 5.0,
+  "alpha_noise_scale": 1.5,
+  "alpha_projection_inverse_weight": 0.1,
+  "bound_penalty": 0.1,
+  "barrier_buffer_distance": 0.05,
+  "barrier_projection_margin": 0.02,
+  "barrier_alpha_cost_weight": 0.0,
+  "br_clearance_margin": 0.8,
+  "br_clearance_weight": 250.0,
+  "br_collision_weight": 100000.0,
+  "cbf_alpha": 1.0,
+  "cbf_qp_iterations": 35,
+  "cbf_qp_rho": 8.0,
+  "cbf_qp_regularization": 1e-08,
+  "shield_cbf_penalty_weight": 900.0,
+  "shield_alpha": 0.98,
+  "shield_repair_horizon": 6,
+  "shield_repair_steps": 8,
+  "shield_repair_step_size": 0.04,
+  "sc_barrier_eps": 0.001,
+  "sc_barrier_gamma": 0.25,
+  "sc_feedback_gain": 0.08,
+  "sc_feedback_clip": 0.7,
+  "sc_feedback_iterations": 1,
+  "sc_feedback_regularization": 0.0001,
+  "sc_beta_cost_weight": 8.0,
+  "sc_state_cost_weight": 0.05,
+  "sc_control_cost_weight": 0.08,
+  "sc_use_combined_barrier": true,
+  "gs_softmin_rho": 25.0,
+  "gs_closed_form_gamma": 2.0,
+  "gs_alpha": 1.0,
+  "gs_composite_margin": 0.0,
+  "plot_samples": 0
+}
+```
