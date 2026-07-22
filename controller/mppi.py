@@ -26,11 +26,19 @@ ALGORITHMS = (
 )
 
 
-class SignedDistanceModel(Protocol):
-    def signed_distance(self, points: jnp.ndarray) -> jnp.ndarray:
+class NeuralBarrierModel(Protocol):
+    def obstacle_barriers(
+        self,
+        state: jnp.ndarray,
+        field: ObstacleField,
+    ) -> jnp.ndarray:
         ...
 
-    def distance_and_gradient(self, points: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+    def obstacle_barriers_and_jacobian(
+        self,
+        state: jnp.ndarray,
+        field: ObstacleField,
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
         ...
 
 
@@ -115,15 +123,31 @@ class MPPIController:
         obstacle_field: ObstacleField,
         *,
         algo: str = "brmppi",
-        sdf_model: SignedDistanceModel | None = None,
+        sdf_model: NeuralBarrierModel | None = None,
         config: MPPIConfig | None = None,
         seed: int = 7,
     ) -> None:
         if algo not in ALGORITHMS:
             raise ValueError(f"Unknown MPPI algorithm '{algo}'. Choose one of {ALGORITHMS}.")
+        if sdf_model is not None and algo != "brmppi":
+            raise NotImplementedError(
+                f"A neural SDF is only implemented for brmppi, not {algo}."
+            )
+        if sdf_model is not None:
+            required_methods = ("obstacle_barriers", "obstacle_barriers_and_jacobian")
+            missing_methods = [
+                method_name
+                for method_name in required_methods
+                if not callable(getattr(sdf_model, method_name, None))
+            ]
+            if missing_methods:
+                raise TypeError(
+                    "sdf_model must implement the optimized neural barrier API; missing: "
+                    + ", ".join(missing_methods)
+                )
         self.robot = robot
         self.obstacle_field = obstacle_field
-        self.sdf_model = sdf_model or obstacle_field
+        self.sdf_model = sdf_model
         self.algo = algo
         self.config = config or MPPIConfig()
         self.key = jax.random.PRNGKey(seed)
@@ -135,9 +159,7 @@ class MPPIController:
 
     @property
     def barrier_source(self) -> str:
-        if hasattr(self.sdf_model, "obstacle_barriers"):
-            return "neural_sdf"
-        return "analytic_sdf"
+        return "neural_sdf" if self.sdf_model is not None else "analytic_sdf"
 
     def command(self, state: jnp.ndarray, goal: jnp.ndarray) -> tuple[jnp.ndarray, dict[str, object]]:
         result = self._command_jit(
@@ -178,7 +200,16 @@ class MPPIController:
             if self.algo == "brmppi"
             else jnp.array([], dtype=float)
         )
-        qp_residual = self._cbf_constraint_residual_jax(jnp.asarray(state, dtype=float), action)
+        if self.algo == "brmppi" and self.sdf_model is not None:
+            # BR-MPPI does not use the CBF-QP residual. Re-evaluating the neural
+            # barriers and Jacobian here, outside the compiled rollout, was a
+            # sizeable neural-only diagnostic cost on every command.
+            constraint_residual = None
+        else:
+            constraint_residual = self._cbf_constraint_residual_jax(
+                jnp.asarray(state, dtype=float),
+                action,
+            )
         next_action_state = self.robot.step(jnp.asarray(state, dtype=float), action, self.config.dt)
         shield_penalty = (
             self._shield_dcbf_penalty_jax(jnp.asarray(state, dtype=float), next_action_state)
@@ -194,8 +225,16 @@ class MPPIController:
             "barrier_source": self.barrier_source,
             "uses_cbf_qp": self._uses_cbf_qp_static(),
             "uses_rollout_cbf_qp": self._uses_rollout_cbf_qp_static(),
-            "cbf_constraint_max_violation": float(jax.device_get(qp_residual)),
-            "cbf_qp_max_violation": float(jax.device_get(qp_residual if self._uses_cbf_qp_static() else 0.0)),
+            "cbf_constraint_max_violation": (
+                None
+                if constraint_residual is None
+                else float(jax.device_get(constraint_residual))
+            ),
+            "cbf_qp_max_violation": (
+                float(jax.device_get(constraint_residual))
+                if self._uses_cbf_qp_static()
+                else 0.0
+            ),
             "shield_dcbf_penalty": float(jax.device_get(shield_penalty)),
             "shield_repair_violation_before": float(jax.device_get(shield_repair_violation_before)),
             "shield_repair_violation_after": float(jax.device_get(shield_repair_violation_after)),
@@ -826,7 +865,7 @@ class MPPIController:
         return self._barrier_values_jax(jnp.asarray(state, dtype=float))
 
     def _barrier_values_jax(self, state: jnp.ndarray) -> jnp.ndarray:
-        if hasattr(self.sdf_model, "obstacle_barriers"):
+        if self.sdf_model is not None:
             return jnp.asarray(self.sdf_model.obstacle_barriers(state, self.obstacle_field), dtype=float)
         return self._analytic_obstacle_barriers_jax(state)
 
@@ -941,8 +980,11 @@ class MPPIController:
                 upper_bound=upper,
             )
 
-        h = self._projection_barrier_values_with_margin_jax(state)
-        barrier_jacobian = self._projection_barrier_jacobian_jax(state)
+        if self.sdf_model is not None:
+            h, barrier_jacobian = self._neural_projection_barrier_values_and_jacobian_jax(state)
+        else:
+            h = self._projection_barrier_values_with_margin_jax(state)
+            barrier_jacobian = self._projection_barrier_jacobian_jax(state)
         drift = self.robot.drift(state)
         control_matrix = self.robot.control_matrix(state)
         physical_block = barrier_jacobian @ control_matrix
@@ -969,6 +1011,29 @@ class MPPIController:
         perturbations = eps * jnp.eye(self.robot.state_dim, dtype=float)
         diff_fn = lambda delta: (self._projection_barrier_values_with_margin_jax(state + delta) - h_base) / eps
         return jax.vmap(diff_fn)(perturbations).T
+
+    def _neural_projection_barrier_values_and_jacobian_jax(
+        self,
+        state: jnp.ndarray,
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """Evaluate neural barriers once and chain their exact local Jacobian."""
+        barrier_state_fn = lambda source_state: self.robot.projection_barrier_state(
+            source_state,
+            self.config.dt,
+        )
+        barrier_state = barrier_state_fn(state)
+        assert self.sdf_model is not None
+        barrier_values, barrier_state_jacobian = self.sdf_model.obstacle_barriers_and_jacobian(
+            barrier_state,
+            self.obstacle_field,
+        )
+        projection_state_jacobian = jax.jacfwd(barrier_state_fn)(state)
+        barrier_values = jnp.asarray(barrier_values, dtype=float)
+        barrier_state_jacobian = jnp.asarray(barrier_state_jacobian, dtype=float)
+        return (
+            barrier_values - self.config.barrier_projection_margin,
+            barrier_state_jacobian @ projection_state_jacobian,
+        )
 
     def _projection_barrier_values(self, state: jnp.ndarray) -> jnp.ndarray:
         return self._projection_barrier_values_jax(jnp.asarray(state, dtype=float))

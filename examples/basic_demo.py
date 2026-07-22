@@ -35,26 +35,20 @@ DEMO_DEFAULTS = {
     "mobile_arm": {"steps": 500, "horizon": 28, "samples": 96, "plot_samples": 96},
 }
 
-NSDF_DEFAULTS = {
-    "unicycle": {"steps": 500, "horizon": 28, "samples": 56, "plot_samples": 56},
-    "dynamic_unicycle": {"steps": 500, "horizon": 28, "samples": 56, "plot_samples": 56},
-    "planar_quadrotor": {"steps": 500, "horizon": 28, "samples": 56, "plot_samples": 56},
-}
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a BR-MPPI obstacle-avoidance demo.")
-    parser.add_argument("--algo", choices=ALGORITHMS, default="brmppi")
-    parser.add_argument("--robot", choices=tuple(sorted(ROBOT_REGISTRY)), default="unicycle")
+    parser.add_argument("--algo", "--method", choices=ALGORITHMS, default="brmppi")
+    parser.add_argument("--robot", "--dynamics", choices=tuple(sorted(ROBOT_REGISTRY)), default="unicycle")
     parser.add_argument("--nsdf", action="store_true", help="Use the pretrained neural signed distance model for h.")
-    parser.add_argument("--steps", type=int, default=None, help="Simulation steps. Defaults depend on robot and --nsdf.")
-    parser.add_argument("--horizon", type=int, default=None, help="MPPI rollout horizon. Defaults depend on robot and --nsdf.")
-    parser.add_argument("--samples", type=int, default=None, help="Number of MPPI samples. Defaults depend on robot and --nsdf.")
+    parser.add_argument("--steps", type=int, default=None, help="Simulation steps. Default depends on the robot.")
+    parser.add_argument("--horizon", type=int, default=None, help="MPPI rollout horizon. Default depends on the robot.")
+    parser.add_argument("--samples", type=int, default=None, help="Number of MPPI samples. Default depends on the robot.")
     parser.add_argument(
         "--plot-samples",
         type=int,
         default=None,
-        help="Number of sampled MPPI trajectories to draw. Defaults depend on robot and --nsdf.",
+        help="Number of sampled MPPI trajectories to draw. Default depends on the robot.",
     )
     parser.add_argument("--dt", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=7)
@@ -75,12 +69,26 @@ def parse_args() -> argparse.Namespace:
 
 
 def apply_demo_defaults(args: argparse.Namespace) -> None:
-    defaults = dict(DEMO_DEFAULTS[args.robot])
-    if args.nsdf:
-        defaults.update(NSDF_DEFAULTS.get(args.robot, {}))
+    # Analytic and neural runs intentionally use the same controller settings so
+    # selecting --nsdf changes only the h-function implementation.
+    defaults = DEMO_DEFAULTS[args.robot]
     for key, value in defaults.items():
         if getattr(args, key) is None:
             setattr(args, key, value)
+
+
+def load_selected_sdf(robot_name: str, algo: str, *, nsdf: bool):
+    if not nsdf:
+        return None
+    if algo != "brmppi":
+        raise NotImplementedError(
+            f"--nsdf is only implemented for brmppi, not {algo}. "
+            "Run this method without --nsdf or select --algo brmppi."
+        )
+    try:
+        return load_pretrained_sdf_for_robot(robot_name, repo_root=REPO_ROOT)
+    except PretrainedSDFUnavailable as exc:
+        raise NotImplementedError(f"--nsdf is not implemented for {robot_name}: {exc}") from exc
 
 
 def main() -> None:
@@ -91,12 +99,8 @@ def main() -> None:
 
     robot = create_robot(args.robot)
     field = default_obstacle_field(robot.name)
-    sdf_model = None
-    if args.nsdf:
-        try:
-            sdf_model = load_pretrained_sdf_for_robot(robot.name, repo_root=REPO_ROOT)
-        except PretrainedSDFUnavailable as exc:
-            raise NotImplementedError(f"--nsdf is not implemented for {robot.name}: {exc}") from exc
+    sdf_model = load_selected_sdf(robot.name, args.algo, nsdf=args.nsdf)
+    if sdf_model is not None:
         print(f"pretrained_sdf={sdf_model.description}")
     config = MPPIConfig(horizon=args.horizon, samples=args.samples, dt=args.dt, plot_samples=args.plot_samples)
     controller = MPPIController(robot, field, algo=args.algo, sdf_model=sdf_model, config=config, seed=args.seed)

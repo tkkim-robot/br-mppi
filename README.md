@@ -107,6 +107,10 @@ Use a vendored pretrained neural signed-distance model for the barrier function:
 uv run python examples/basic_demo.py --algo brmppi --robot unicycle --nsdf --headless
 ```
 
+`--nsdf` is implemented only for `brmppi`; selecting it with another method raises
+`NotImplementedError`. Analytic and neural demo runs use the same horizon, sample
+count, environment, and seed so the flag changes only the h-function source.
+
 Pretrained NSDF support is enabled only when a vendored `sdf/trained_models`
 checkpoint matches the robot footprint used here:
 
@@ -116,7 +120,7 @@ checkpoint matches the robot footprint used here:
 
 `single_integrator` and `mobile_arm` raise `NotImplementedError` for `--nsdf` because this
 checkout does not contain matching pretrained disk/point or full mobile-arm geometry
-checkpoints. The previous online/random-feature SDF fitter has been removed from the runnable path.
+checkpoints. There is no fallback geometry model.
 
 Useful tuning flags:
 
@@ -127,18 +131,53 @@ uv run python examples/basic_demo.py --samples 256 --horizon 30 --steps 160 --se
 Run the compact safety sanity check without plotting:
 
 ```bash
-uv run python examples/sanity_check.py --include-nsdf
+uv run python examples/sanity_check.py --robot unicycle --algo brmppi --nsdf
+uv run python examples/sanity_check.py --robot unicycle --algo brmppi --include-nsdf
 ```
 
 This prints executed, sampled-rollout, and best-rollout clearance metrics for the analytic and neural-SDF barrier paths. Use it as the quick baseline when changing BR-MPPI cost terms.
 
-The demo uses robot-specific default horizons so the BR-MPPI sample cloud visibly branches around obstacles. The single-integrator and dynamic-unicycle cases use 20-step rollout horizons, while unicycle and planar-quadrotor cases use 36-step rollout horizons by default. The mobile-arm default uses a 28-step horizon because its sampled footprint is much heavier to evaluate. Neural-SDF runs use 28-step horizons for the supported robots. All demos default to a 500-step maximum simulation cap and stop early on goal success. You can still override these with `--horizon`, `--samples`, `--steps`, and `--plot-samples`.
+The demo uses robot-specific default horizons so the BR-MPPI sample cloud visibly branches around obstacles. The single-integrator and dynamic-unicycle cases use 20-step rollout horizons, while unicycle and planar-quadrotor cases use 36-step rollout horizons by default. The mobile-arm default uses a 28-step horizon because its sampled footprint is much heavier to evaluate. All demos default to a 500-step maximum simulation cap and stop early on goal success. You can still override these with `--horizon`, `--samples`, `--steps`, and `--plot-samples`.
+
+## Tuned Analytic/NSDF Benchmark
+
+For a single BR-MPPI method, `random_benchmark.py` loads the repository's tuned
+Optuna configuration by default. Omit `--nsdf` for the analytic h-function and add
+it to change only the barrier source while retaining the same configuration,
+random obstacle fields, and controller seeds:
+
+```bash
+uv run python examples/random_benchmark.py --robot unicycle --algo brmppi
+uv run python examples/random_benchmark.py --robot unicycle --algo brmppi --nsdf
+```
+
+Use `--no-tuned-config` for the older generic benchmark defaults. NSDF output files
+include `neural_sdf_tuned` in their names and record the selected checkpoint and
+full tuned configuration. Single-integrator and mobile-arm NSDF benchmarks remain
+unavailable until matching geometry checkpoints are trained. The completed 100-trial
+analytic/NSDF comparison and optimization history are recorded in
+[`docs/nsdf_benchmark_results.md`](docs/nsdf_benchmark_results.md).
+
+The NSDF network weights, obstacle point clouds, and MLP queries use float32. Its
+barrier Jacobian is computed directly from the network's local gradient and chained
+through the robot-frame and lookahead transforms. The controller and analytic barrier
+path remain x64, and the analytic barrier retains its existing finite-difference
+Jacobian.
 
 The default scene uses a larger random-looking circular obstacle field inspired by the BR-MPPI paper's branching-rollout illustration. A straight-line path from start to goal intersects obstacles for every robot, and the useful trajectories snake through clutter with obstacles on both sides instead of bypassing the field along open edges. The mobile-arm demo uses an even larger workspace with its own obstacle field because its fixed footprint is much larger. The green transparent lines are the MPPI sample cloud and the dashed blue line is the best sampled rollout at the current step.
 
-The BR-MPPI implementation samples augmented controls `[u, alpha_dot]`, carries one class-K rate state per obstacle, projects each rollout control with the original closed-form weighted equality projection `A z = b`, and uses the mobile-arm nearest-barrier buffer cost `alpha_min / h_min`. The projection rows follow the original `mobile_arm` structure: `A = [dh/dx g(x), diag(h)]` and `b = -dh/dx f(x)`, with `dh/dx` finite-differenced so the same path works for analytic and neural-SDF barriers. Single-integrator and unicycle-style models use the immediate barrier state, while relative-degree-2 models use the same 5-step derived/lookahead barrier idea as `mobile_arm`: dynamic unicycle projects from a short future pose and planar quadrotor projects from `position + velocity * 5dt`. A small explicit projection margin tightens the obstacle barrier to absorb first-order discretization error. When a projected physical control reaches an actuator bound, the implementation recomputes the alpha components analytically so the bounded control still satisfies the BR equality rows. The BR rollout cost also adds a clearance shaping term and hard collision penalty so collided rollouts are strongly disfavored without changing the projection mechanism.
+The BR-MPPI implementation samples augmented controls `[u, alpha_dot]`, carries one class-K rate state per obstacle, projects each rollout control with the original closed-form weighted equality projection `A z = b`, and uses the mobile-arm nearest-barrier buffer cost `alpha_min / h_min`. The projection rows follow the original `mobile_arm` structure: `A = [dh/dx g(x), diag(h)]` and `b = -dh/dx f(x)`. Analytic h uses the existing finite-difference Jacobian; NSDF uses the direct MLP gradient plus the robot-frame/lookahead chain rule. Single-integrator and unicycle-style models use the immediate barrier state, while relative-degree-2 models use the same 5-step derived/lookahead barrier idea as `mobile_arm`: dynamic unicycle projects from a short future pose and planar quadrotor projects from `position + velocity * 5dt`. A small explicit projection margin tightens the obstacle barrier to absorb first-order discretization error. When a projected physical control reaches an actuator bound, the implementation recomputes the alpha components analytically so the bounded control still satisfies the BR equality rows. The BR rollout cost also adds a clearance shaping term and hard collision penalty so collided rollouts are strongly disfavored without changing the projection mechanism.
 
-All CBF/barrier baselines use the same h-function, projection margin, finite-difference Jacobian, and relative-degree lookahead state as BR-MPPI. The `mppi_cbf` baseline solves the linearized CBF row `dh/dx (f(x) + g(x)u) + alpha h(x) >= 0` with actuator bounds as a small box-constrained QP in JAX. `shield_mppi`, `sc_mppi`, and `gs_mppi` intentionally do not use that generic rollout QP path: Shield uses DCBF rollout penalties plus local sequence repair, SC uses finite-horizon embedded-barrier-state feedback during sampling, and GS uses a composite CBF with closed-form minimum-intervention safe control. The `gs_cbf_residual_after_clipping` diagnostic reports any post-clipping violation of the composite-CBF inequality.
+All analytic CBF/barrier baseline runs use the same h-function, projection margin,
+finite-difference Jacobian, and relative-degree lookahead state as analytic BR-MPPI.
+The `mppi_cbf` baseline solves the linearized CBF row
+`dh/dx (f(x) + g(x)u) + alpha h(x) >= 0` with actuator bounds as a small
+box-constrained QP in JAX. `shield_mppi`, `sc_mppi`, and `gs_mppi` intentionally do
+not use that generic rollout QP path: Shield uses DCBF rollout penalties plus local
+sequence repair, SC uses finite-horizon embedded-barrier-state feedback during
+sampling, and GS uses a composite CBF with closed-form minimum-intervention safe
+control. The `gs_cbf_residual_after_clipping` diagnostic reports any post-clipping
+violation of the composite-CBF inequality.
 
 Each run prints three safety diagnostics: executed trajectory clearance, minimum sampled-rollout clearance, and minimum best-rollout clearance. Collided samples can still appear in the MPPI population because sampling remains stochastic, but the selected best rollout should stay collision-free when the cost tuning is working.
 
@@ -156,4 +195,4 @@ The analytic SDF in this demo is computed against circular obstacles. Each robot
 
 For each body point, the code computes `distance(point, obstacle_center) - obstacle_radius`, takes the closest obstacle, then takes the minimum across all robot body points and subtracts the robot body-point radius. This is a sampled footprint approximation for rectangles and arms, not an exact polygon-to-circle distance query.
 
-When `--nsdf` is enabled for a supported robot, the barrier-rate h-function is evaluated by loading the matching pretrained Flax parameter dump from `sdf/trained_models`, sampling each circular obstacle boundary into a point cloud, transforming those points into the robot body frame, and taking the minimum predicted SDF value. Rollout collision checks still use the analytic body-point clearance so the reported collision metric is consistent across analytic and neural runs.
+When `--nsdf` is enabled for a supported robot, the barrier-rate h-function is evaluated by loading the matching pretrained Flax parameter dump from `sdf/trained_models`, sampling each circular obstacle boundary into a point cloud, transforming those points into the robot body frame, and taking the minimum predicted SDF value. The tuned rollout clearance shaping, collision rejection, and reported collision metric still use the analytic body-point clearance so those parts remain identical across analytic and neural runs. Consequently, this is a neural barrier-rate comparison, not a fully neural collision-checking pipeline. The analytic footprint also includes the robot's body-point padding, while the pretrained NSDF zero level set represents the nominal polygon.

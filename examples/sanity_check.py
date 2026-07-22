@@ -37,9 +37,11 @@ class SanityResult:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run compact MPPI/BR-MPPI safety sanity checks.")
-    parser.add_argument("--algo", choices=ALGORITHMS, default="brmppi")
-    parser.add_argument("--robot", choices=tuple(sorted(ROBOT_REGISTRY)), default="unicycle")
-    parser.add_argument("--include-nsdf", action="store_true", help="Also run the pretrained neural-SDF barrier case.")
+    parser.add_argument("--algo", "--method", choices=ALGORITHMS, default="brmppi")
+    parser.add_argument("--robot", "--dynamics", choices=tuple(sorted(ROBOT_REGISTRY)), default="unicycle")
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--nsdf", action="store_true", help="Run only the pretrained neural-SDF barrier case.")
+    source.add_argument("--include-nsdf", action="store_true", help="Run both analytic and neural-SDF barrier cases.")
     parser.add_argument("--steps", type=int, default=500)
     parser.add_argument("--horizon", type=int, default=12)
     parser.add_argument("--samples", type=int, default=16)
@@ -54,7 +56,15 @@ def run_case(args: argparse.Namespace, *, nsdf: bool) -> SanityResult:
     field = default_obstacle_field(robot.name)
     sdf_model = None
     if nsdf:
-        sdf_model = load_pretrained_sdf_for_robot(robot.name, repo_root=REPO_ROOT)
+        if args.algo != "brmppi":
+            raise NotImplementedError(
+                f"--nsdf is only implemented for brmppi, not {args.algo}. "
+                "Run this method without --nsdf or select --algo brmppi."
+            )
+        try:
+            sdf_model = load_pretrained_sdf_for_robot(robot.name, repo_root=REPO_ROOT)
+        except PretrainedSDFUnavailable as exc:
+            raise NotImplementedError(f"--nsdf is not implemented for {robot.name}: {exc}") from exc
 
     config = MPPIConfig(
         horizon=args.horizon,
@@ -128,7 +138,9 @@ def exact_clearance(field, robot, state: jnp.ndarray) -> float:
 def print_table(results: list[SanityResult]) -> None:
     header = (
         "case",
-        "actual",
+        "outcome",
+        "steps",
+        "final_error",
         "exact_min",
         "sample_min",
         "best_min",
@@ -140,12 +152,14 @@ def print_table(results: list[SanityResult]) -> None:
     print(" | ".join("---" for _ in header))
     for result in results:
         case = f"{result.algo}/{result.robot}/{result.barrier_source}"
-        actual = "collision" if result.collision else "safe"
+        outcome = "reached" if result.reached else ("collision" if result.collision else "timeout")
         print(
             " | ".join(
                 (
                     case,
-                    actual,
+                    outcome,
+                    str(result.steps),
+                    f"{result.final_error:.3f}",
                     f"{result.min_exact_clearance:+.3f}",
                     f"{result.sampled_min_clearance:+.3f}",
                     f"{result.best_rollout_min_clearance:+.3f}",
@@ -163,11 +177,11 @@ def format_optional_step(step: int | None) -> str:
 
 def main() -> None:
     args = parse_args()
-    results = [run_case(args, nsdf=False)]
+    results = [run_case(args, nsdf=args.nsdf)]
     if args.include_nsdf:
         try:
             results.append(run_case(args, nsdf=True))
-        except PretrainedSDFUnavailable as exc:
+        except NotImplementedError as exc:
             print(f"skipping nsdf: {exc}", file=sys.stderr)
 
     if args.json:
