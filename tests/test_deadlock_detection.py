@@ -111,6 +111,45 @@ def test_run_trial_does_not_deadlock_when_position_moves(monkeypatch) -> None:
     assert result.steps == 6
 
 
+def test_run_trial_excludes_warmup_from_command_timing(monkeypatch) -> None:
+    clock = {"seconds": 0.0}
+
+    class TimedController:
+        def __init__(self, robot, field, *_args, config, **_kwargs) -> None:
+            self.robot = robot
+            self.config = config
+            self.num_barriers = len(field.obstacles)
+            self.control_sequence = jnp.zeros((config.horizon, robot.control_dim + self.num_barriers))
+            self.alpha_state = jnp.zeros((self.num_barriers,))
+            self.calls = 0
+            self.barrier_source = "analytic_sdf"
+
+        def command(self, _state, _goal):
+            self.calls += 1
+            clock["seconds"] += 100.0 if self.calls == 1 else 2.0
+            return jnp.zeros((self.robot.control_dim,), dtype=float), diagnostic_payload()
+
+    monkeypatch.setattr(rb, "MPPIController", TimedController)
+    monkeypatch.setattr(rb.time, "perf_counter", lambda: clock["seconds"])
+    result = rb.run_trial(
+        robot_name="single_integrator",
+        field=far_obstacle_field(),
+        algo="brmppi",
+        trial=0,
+        field_seed=13,
+        controller_seed=7,
+        horizon=2,
+        samples=3,
+        max_steps=1,
+        dt=0.1,
+        warmup=True,
+    )
+
+    assert result.mean_command_ms == 2000.0
+    assert result.p95_command_ms == 2000.0
+    assert result.wall_seconds == 2.0
+
+
 def far_obstacle_field() -> ObstacleField:
     return ObstacleField(obstacles=(CircleObstacle(center=(100.0, 100.0), radius=1.0),))
 

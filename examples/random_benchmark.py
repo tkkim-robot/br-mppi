@@ -15,9 +15,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from controller import ALGORITHMS, MPPIConfig, MPPIController
+from controller import ALGORITHMS, MPPIConfig, MPPIController, load_tuned_config
 from robots import ROBOT_REGISTRY, create_robot
-from sdf import CircleObstacle, ObstacleField
+from sdf import CircleObstacle, ObstacleField, PretrainedSDFUnavailable, load_pretrained_sdf_for_robot
 
 
 ROBOT_DEFAULTS = {
@@ -57,21 +57,33 @@ class TrialResult:
     deadlock_window: int = 0
     deadlock_position_tolerance: float = 0.0
     deadlock_progress_tolerance: float = 0.0
+    barrier_source: str = "analytic_sdf"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run MPPI-family benchmarks across randomized circular-obstacle fields.",
     )
-    parser.add_argument("--algo", "--model", choices=("all", *ALGORITHMS), default="all")
+    parser.add_argument("--algo", "--method", "--model", choices=("all", *ALGORITHMS), default="all")
     parser.add_argument("--robot", "--dynamics", choices=tuple(sorted(ROBOT_REGISTRY)), default="unicycle")
+    parser.add_argument(
+        "--nsdf",
+        action="store_true",
+        help="Use the matching pretrained neural SDF. This is supported only with --algo brmppi.",
+    )
+    parser.add_argument(
+        "--tuned-config",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Load repository tuned parameters. Defaults to true for a single brmppi benchmark.",
+    )
     parser.add_argument("--trials", "--trails", type=int, default=100)
     parser.add_argument("--seed", type=int, default=13, help="Base seed for randomized obstacle fields.")
     parser.add_argument("--controller-seed", type=int, default=7, help="Base seed for MPPI sampling.")
     parser.add_argument("--horizon", type=int, default=None)
     parser.add_argument("--samples", type=int, default=None)
     parser.add_argument("--max-steps", type=int, default=None, help="Generous per-trial simulation cap.")
-    parser.add_argument("--dt", type=float, default=0.1)
+    parser.add_argument("--dt", type=float, default=None)
     parser.add_argument("--min-obstacles", type=int, default=None, help="Defaults match the standard demo scene count.")
     parser.add_argument("--max-obstacles", type=int, default=None, help="Defaults match the standard demo scene count.")
     parser.add_argument("--workspace-margin", type=float, default=2.5)
@@ -103,9 +115,14 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.nsdf and args.algo != "brmppi":
+        raise NotImplementedError(
+            f"--nsdf is only implemented for brmppi, not {args.algo}. "
+            "Select --algo brmppi when benchmarking the neural SDF."
+        )
+
     defaults = ROBOT_DEFAULTS[args.robot]
-    horizon = args.horizon or defaults["horizon"]
-    samples = args.samples or defaults["samples"]
+    use_tuned_config = args.tuned_config if args.tuned_config is not None else args.algo == "brmppi"
     max_steps = args.max_steps or defaults["max_steps"]
     min_obstacles = args.min_obstacles or defaults["min_obstacles"]
     max_obstacles = args.max_obstacles or defaults["max_obstacles"]
@@ -113,6 +130,17 @@ def main() -> None:
         raise ValueError("--min-obstacles must be positive and <= --max-obstacles")
 
     algos = ALGORITHMS if args.algo == "all" else (args.algo,)
+    configs = resolve_benchmark_configs(args, algos, use_tuned_config=use_tuned_config)
+    sdf_model = load_benchmark_sdf(args.robot, nsdf=args.nsdf)
+    barrier_source = "neural_sdf" if sdf_model is not None else "analytic_sdf"
+    run_parameters = {
+        algo: {
+            "horizon": configs[algo].horizon if configs[algo] is not None else (args.horizon or defaults["horizon"]),
+            "samples": configs[algo].samples if configs[algo] is not None else (args.samples or defaults["samples"]),
+            "dt": configs[algo].dt if configs[algo] is not None else (args.dt if args.dt is not None else 0.1),
+        }
+        for algo in algos
+    }
     robot = create_robot(args.robot)
     results: list[TrialResult] = []
 
@@ -130,6 +158,10 @@ def main() -> None:
         )
         for algo in algos:
             controller_seed = args.controller_seed + trial
+            config = configs.get(algo)
+            horizon = run_parameters[algo]["horizon"]
+            samples = run_parameters[algo]["samples"]
+            dt = run_parameters[algo]["dt"]
             result = run_trial(
                 robot_name=args.robot,
                 field=field,
@@ -140,8 +172,10 @@ def main() -> None:
                 horizon=horizon,
                 samples=samples,
                 max_steps=max_steps,
-                dt=args.dt,
+                dt=dt,
                 warmup=args.warmup,
+                config=config,
+                sdf_model=sdf_model,
                 deadlock_window=args.deadlock_window,
                 deadlock_position_tolerance=args.deadlock_position_tolerance,
                 deadlock_progress_tolerance=args.deadlock_progress_tolerance,
@@ -155,10 +189,14 @@ def main() -> None:
             "robot": args.robot,
             "algos": list(algos),
             "trials": args.trials,
-            "horizon": horizon,
-            "samples": samples,
+            "barrier_source": barrier_source,
+            "pretrained_sdf": None if sdf_model is None else sdf_model.description,
+            "tuned_config": use_tuned_config,
+            "run_parameters": run_parameters,
+            "configs": {
+                algo: asdict(config) if config is not None else None for algo, config in configs.items()
+            },
             "max_steps": max_steps,
-            "dt": args.dt,
             "seed": args.seed,
             "controller_seed": args.controller_seed,
             "min_obstacles": min_obstacles,
@@ -174,12 +212,50 @@ def main() -> None:
         "summary": summarize_results(results),
         "results": [asdict(result) for result in results],
     }
-    output_path = args.output or default_output_path(args.robot, algos)
+    if len(algos) == 1 and configs.get(algos[0]) is not None:
+        report["best_config"] = asdict(configs[algos[0]])
+    output_path = args.output or default_output_path(
+        args.robot,
+        algos,
+        barrier_source=barrier_source,
+        tuned_config=use_tuned_config,
+    )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
     print_summary(report["summary"])
     print(f"results={output_path}")
+
+
+def resolve_benchmark_configs(
+    args: argparse.Namespace,
+    algos: tuple[str, ...],
+    *,
+    use_tuned_config: bool,
+) -> dict[str, MPPIConfig | None]:
+    if not use_tuned_config:
+        return {algo: None for algo in algos}
+
+    overrides = {"plot_samples": 0}
+    if args.horizon is not None:
+        overrides["horizon"] = args.horizon
+    if args.samples is not None:
+        overrides["samples"] = args.samples
+    if args.dt is not None:
+        overrides["dt"] = args.dt
+    return {
+        algo: load_tuned_config(args.robot, algo, overrides=overrides)
+        for algo in algos
+    }
+
+
+def load_benchmark_sdf(robot_name: str, *, nsdf: bool):
+    if not nsdf:
+        return None
+    try:
+        return load_pretrained_sdf_for_robot(robot_name, repo_root=REPO_ROOT)
+    except PretrainedSDFUnavailable as exc:
+        raise NotImplementedError(f"--nsdf is not implemented for {robot_name}: {exc}") from exc
 
 
 def random_obstacle_field(
@@ -304,6 +380,7 @@ def run_trial(
     dt: float,
     warmup: bool,
     config: MPPIConfig | None = None,
+    sdf_model=None,
     deadlock_window: int = DEFAULT_DEADLOCK_WINDOW,
     deadlock_position_tolerance: float = DEFAULT_DEADLOCK_POSITION_TOLERANCE,
     deadlock_progress_tolerance: float = DEFAULT_DEADLOCK_PROGRESS_TOLERANCE,
@@ -315,7 +392,14 @@ def run_trial(
         dt=dt,
         plot_samples=0,
     )
-    controller = MPPIController(robot, field, algo=algo, config=controller_config, seed=controller_seed)
+    controller = MPPIController(
+        robot,
+        field,
+        algo=algo,
+        sdf_model=sdf_model,
+        config=controller_config,
+        seed=controller_seed,
+    )
     if warmup:
         action, _diagnostics = controller.command(robot.default_state.copy(), robot.default_goal.copy())
         jax.block_until_ready(action)
@@ -406,6 +490,7 @@ def run_trial(
         deadlock_window=deadlock_window,
         deadlock_position_tolerance=deadlock_position_tolerance,
         deadlock_progress_tolerance=deadlock_progress_tolerance,
+        barrier_source=getattr(controller, "barrier_source", "analytic_sdf"),
     )
 
 
@@ -472,7 +557,7 @@ def print_trial_result(result: TrialResult) -> None:
     status = "reached" if result.reached else ("collision" if result.collision else ("deadlock" if result.deadlock else "timeout"))
     print(
         f"trial={result.trial:03d} seed={result.field_seed} "
-        f"algo={result.algo:12s} robot={result.robot:18s} status={status:9s} "
+        f"algo={result.algo:12s} robot={result.robot:18s} source={result.barrier_source:12s} status={status:9s} "
         f"steps={result.steps:4d} obs={result.obstacle_count:2d} "
         f"min_clear={result.min_exact_clearance:+.3f} "
         f"final_error={result.final_error:.2f} mean={result.mean_command_ms:.2f}ms",
@@ -503,10 +588,21 @@ def print_summary(summary: list[dict[str, float | int | str]]) -> None:
         )
 
 
-def default_output_path(robot_name: str, algos: tuple[str, ...]) -> Path:
+def default_output_path(
+    robot_name: str,
+    algos: tuple[str, ...],
+    *,
+    barrier_source: str = "analytic_sdf",
+    tuned_config: bool = False,
+) -> Path:
     stamp = time.strftime("%Y%m%d_%H%M%S")
     algo_label = "all" if len(algos) > 1 else algos[0]
-    return Path("output") / "benchmarks" / f"random_obstacles_{robot_name}_{algo_label}_{stamp}.json"
+    config_label = "tuned" if tuned_config else "default"
+    return (
+        Path("output")
+        / "benchmarks"
+        / f"random_obstacles_{robot_name}_{algo_label}_{barrier_source}_{config_label}_{stamp}.json"
+    )
 
 
 if __name__ == "__main__":

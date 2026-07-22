@@ -9,6 +9,9 @@ import numpy as np
 from sdf.geometry import ObstacleField
 
 
+NSDF_DTYPE = jnp.float32
+
+
 class PretrainedSDFUnavailable(RuntimeError):
     """Raised when no matching pretrained SDF asset is available."""
 
@@ -46,8 +49,8 @@ class PretrainedShapeSDF:
 
     def __post_init__(self) -> None:
         self.params = _params_to_jax(self.params)
-        self._field_cache_key: tuple[tuple[float, float, float], ...] | None = None
-        self._field_cache_points: jnp.ndarray | None = None
+        self._field_cache_key: tuple[int, tuple[tuple[float, float, float], ...]] | None = None
+        self._field_cache_points: np.ndarray | None = None
 
     @property
     def description(self) -> str:
@@ -58,51 +61,104 @@ class PretrainedShapeSDF:
 
     def signed_distance(self, points: jnp.ndarray) -> jnp.ndarray:
         """Evaluate the checkpoint in its local shape frame."""
-        local_points = jnp.atleast_2d(jnp.asarray(points, dtype=float))
+        local_points = jnp.atleast_2d(jnp.asarray(points, dtype=NSDF_DTYPE))
         local_points = _pad_points_to_3d(local_points)
-        return self._value_and_local_gradient(local_points)[0]
-
-    def distance_and_gradient(self, points: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
-        local_points = jnp.atleast_2d(jnp.asarray(points, dtype=float))
-        local_points = _pad_points_to_3d(local_points)
-        values, gradients = self._value_and_local_gradient(local_points)
-        return values, gradients[:, :2]
-
-    def clearance_and_gradient(self, state: jnp.ndarray, field: ObstacleField) -> tuple[jnp.ndarray, jnp.ndarray]:
-        obstacle_points = self._obstacle_points(field)
-        state = jnp.asarray(state, dtype=float)
-        x, y = state[:2]
-        theta = state[2] if state.shape[0] >= 3 else jnp.array(0.0, dtype=float)
-        c, s = jnp.cos(theta), jnp.sin(theta)
-        rot = jnp.array([[c, -s], [s, c]], dtype=float)
-        local_xy = (obstacle_points - jnp.array([x, y], dtype=float)) @ rot
-        local_points = jnp.column_stack((local_xy, jnp.zeros(local_xy.shape[0], dtype=float)))
-        values, local_gradients = self._value_and_local_gradient(local_points)
-        nearest = jnp.argmin(values)
-        value = values[nearest]
-
-        gx, gy = local_gradients[nearest, 0], local_gradients[nearest, 1]
-        world_gradient = jnp.array([-gx * c + gy * s, -gx * s - gy * c], dtype=float)
-        norm = jnp.linalg.norm(world_gradient)
-        world_gradient = jnp.where(norm > 1e-8, world_gradient / jnp.maximum(norm, 1e-8), world_gradient)
-        return value, world_gradient
+        return self._values(local_points)
 
     def obstacle_barriers(self, state: jnp.ndarray, field: ObstacleField) -> jnp.ndarray:
         """Return one robot-shape SDF barrier value per obstacle."""
         obstacle_points = self._obstacle_points(field)
-        state = jnp.asarray(state, dtype=float)
+        state = jnp.asarray(state, dtype=NSDF_DTYPE)
         x, y = state[:2]
-        theta = state[2] if state.shape[0] >= 3 else jnp.array(0.0, dtype=float)
+        theta = state[2] if state.shape[0] >= 3 else jnp.array(0.0, dtype=NSDF_DTYPE)
         c, s = jnp.cos(theta), jnp.sin(theta)
-        rot = jnp.array([[c, -s], [s, c]], dtype=float)
-        local_xy = (obstacle_points - jnp.array([x, y], dtype=float)) @ rot
-        local_points = jnp.column_stack((local_xy, jnp.zeros(local_xy.shape[0], dtype=float)))
-        values = self._value_and_local_gradient(local_points)[0]
+        rot = jnp.array([[c, -s], [s, c]], dtype=NSDF_DTYPE)
+        local_xy = (obstacle_points - jnp.array([x, y], dtype=NSDF_DTYPE)) @ rot
+        local_points = jnp.column_stack((local_xy, jnp.zeros(local_xy.shape[0], dtype=NSDF_DTYPE)))
+        values = self._values(local_points)
         values = values.reshape((len(field.obstacles), self.points_per_obstacle))
         return jnp.min(values, axis=1)
 
+    def obstacle_barriers_and_jacobian(
+        self,
+        state: jnp.ndarray,
+        field: ObstacleField,
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """Return per-obstacle barriers and their exact robot-state Jacobian.
+
+        The network and its local gradients are evaluated once. The selected
+        surface point for each obstacle is then differentiated through the
+        world-to-robot rigid transform. State components after ``(x, y, yaw)``
+        do not directly affect the shape SDF and therefore have zero columns.
+        """
+        obstacle_points = self._obstacle_points(field)
+        state = jnp.asarray(state, dtype=NSDF_DTYPE)
+        x, y = state[:2]
+        theta = state[2] if state.shape[0] >= 3 else jnp.array(0.0, dtype=NSDF_DTYPE)
+        c, s = jnp.cos(theta), jnp.sin(theta)
+        rot = jnp.array([[c, -s], [s, c]], dtype=NSDF_DTYPE)
+        local_xy = (obstacle_points - jnp.array([x, y], dtype=NSDF_DTYPE)) @ rot
+        local_points = jnp.column_stack((local_xy, jnp.zeros(local_xy.shape[0], dtype=NSDF_DTYPE)))
+        point_values, point_local_gradients = self._value_and_local_gradient(local_points)
+
+        obstacle_count = len(field.obstacles)
+        values = point_values.reshape((obstacle_count, self.points_per_obstacle))
+        local_gradients = point_local_gradients[:, :2].reshape(
+            (obstacle_count, self.points_per_obstacle, 2)
+        )
+        local_coordinates = local_xy.reshape((obstacle_count, self.points_per_obstacle, 2))
+        nearest = jnp.argmin(values, axis=1)
+        row = jnp.arange(obstacle_count)
+        chosen_values = values[row, nearest]
+        chosen_gradients = local_gradients[row, nearest]
+        chosen_coordinates = local_coordinates[row, nearest]
+
+        gx, gy = chosen_gradients[:, 0], chosen_gradients[:, 1]
+        local_x, local_y = chosen_coordinates[:, 0], chosen_coordinates[:, 1]
+        jacobian = jnp.zeros((obstacle_count, state.shape[0]), dtype=NSDF_DTYPE)
+        jacobian = jacobian.at[:, 0].set(-gx * c + gy * s)
+        jacobian = jacobian.at[:, 1].set(-gx * s - gy * c)
+        if state.shape[0] >= 3:
+            jacobian = jacobian.at[:, 2].set(gx * local_y - gy * local_x)
+        return chosen_values, jacobian
+
     def _obstacle_points(self, field: ObstacleField) -> jnp.ndarray:
-        return field.surface_points(self.points_per_obstacle)
+        obstacle_key = tuple(
+            (float(center[0]), float(center[1]), obstacle.radius)
+            for obstacle in field.obstacles
+            for center in (np.asarray(obstacle.center, dtype=np.float64),)
+        )
+        cache_key = (self.points_per_obstacle, obstacle_key)
+        if cache_key != self._field_cache_key:
+            theta = np.linspace(
+                0.0,
+                2.0 * np.pi,
+                self.points_per_obstacle,
+                endpoint=False,
+            )
+            unit_circle = np.stack((np.cos(theta), np.sin(theta)), axis=1)
+            centers = np.asarray([[x, y] for x, y, _radius in obstacle_key], dtype=np.float64)
+            radii = np.asarray([radius for _x, _y, radius in obstacle_key], dtype=np.float64)
+            self._field_cache_key = cache_key
+            self._field_cache_points = (
+                centers[:, None, :] + radii[:, None, None] * unit_circle[None, :, :]
+            ).reshape((-1, 2)).astype(np.float32)
+        assert self._field_cache_points is not None
+        return jnp.asarray(self._field_cache_points, dtype=NSDF_DTYPE)
+
+    def _values(self, points: jnp.ndarray) -> jnp.ndarray:
+        weights = self.params["params"]
+        w0, b0 = _dense_params(weights, "Dense_0")
+        w1, b1 = _dense_params(weights, "Dense_1")
+        w2, b2 = _dense_params(weights, "Dense_2")
+        w3, b3 = _dense_params(weights, "Dense_3")
+
+        z0 = points @ w0 + b0
+        z1 = z0 @ w1 + b1
+        a1 = _softplus(z1)
+        z2 = a1 @ w2 + b2
+        a2 = _softplus(z2)
+        return (a2 @ w3 + b3).reshape(-1)
 
     def _value_and_local_gradient(self, points: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
         weights = self.params["params"]
@@ -145,8 +201,8 @@ def _params_to_jax(params: dict) -> dict:
     converted = {"params": {}}
     for layer_name, layer in params["params"].items():
         converted["params"][layer_name] = {
-            "kernel": jnp.asarray(layer["kernel"], dtype=float),
-            "bias": jnp.asarray(layer["bias"], dtype=float),
+            "kernel": jnp.asarray(layer["kernel"], dtype=NSDF_DTYPE),
+            "bias": jnp.asarray(layer["bias"], dtype=NSDF_DTYPE),
         }
     return converted
 
@@ -158,7 +214,7 @@ def _dense_params(params: dict, name: str) -> tuple[jnp.ndarray, jnp.ndarray]:
 
 def _pad_points_to_3d(points: jnp.ndarray) -> jnp.ndarray:
     if points.shape[1] == 2:
-        return jnp.column_stack((points, jnp.zeros(points.shape[0], dtype=float)))
+        return jnp.column_stack((points, jnp.zeros(points.shape[0], dtype=NSDF_DTYPE)))
     return points
 
 
@@ -168,5 +224,5 @@ def _softplus(x: jnp.ndarray) -> jnp.ndarray:
 
 def _sigmoid(x: jnp.ndarray) -> jnp.ndarray:
     positive = x >= 0.0
-    exp_x = jnp.exp(x)
-    return jnp.where(positive, 1.0 / (1.0 + jnp.exp(-x)), exp_x / (1.0 + exp_x))
+    exp_neg_abs = jnp.exp(-jnp.abs(x))
+    return jnp.where(positive, 1.0 / (1.0 + exp_neg_abs), exp_neg_abs / (1.0 + exp_neg_abs))
