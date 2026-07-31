@@ -185,6 +185,10 @@ def test_benchmark_rejects_nsdf_for_other_methods(monkeypatch: pytest.MonkeyPatc
         random_benchmark.main()
 
 
-def test_benchmark_reports_unsupported_nsdf_robot() -> None:
+def test_benchmark_reports_unsupported_legacy_mobile_nsdf() -> None:
     with pytest.raises(NotImplementedError, match="mobile_arm"):
-        random_benchmark.load_benchmark_sdf("mobile_arm", nsdf=True)
+        random_benchmark.load_benchmark_sdf(
+            "mobile_arm",
+            nsdf=True,
+            variant="legacy",
+        )

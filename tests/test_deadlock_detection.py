@@ -5,6 +5,7 @@ import sys
 
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES_DIR = REPO_ROOT / "examples"
@@ -12,6 +13,7 @@ for path in (REPO_ROOT, EXAMPLES_DIR):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+from robots import create_robot
 from sdf import CircleObstacle, ObstacleField
 
 import random_benchmark as rb
@@ -78,6 +80,11 @@ def test_run_trial_marks_stationary_controller_deadlock_as_timeout(monkeypatch) 
     assert not result.reached
     assert not result.collision
     assert result.steps == 3
+    assert result.controller_seed == 7
+    assert result.min_continuous_clearance is None
+    summary = rb.summarize_results([result])[0]
+    assert summary["continuous_collisions"] is None
+    assert summary["worst_continuous_clearance"] is None
 
 
 def test_run_trial_does_not_deadlock_when_position_moves(monkeypatch) -> None:
@@ -148,6 +155,24 @@ def test_run_trial_excludes_warmup_from_command_timing(monkeypatch) -> None:
     assert result.mean_command_ms == 2000.0
     assert result.p95_command_ms == 2000.0
     assert result.wall_seconds == 2.0
+
+
+def test_mobile_continuous_clearance_uses_full_rectangle_union() -> None:
+    robot = create_robot("mobile_arm")
+    state = robot.default_state
+    center = robot.position(state)
+    field = ObstacleField(
+        obstacles=(
+            CircleObstacle(
+                center=(float(center[0]), float(center[1])),
+                radius=0.1,
+            ),
+        )
+    )
+
+    clearance = rb.continuous_geometry_clearance(field, robot, state)
+
+    assert clearance == pytest.approx(-0.62, abs=1e-6)
 
 
 def far_obstacle_field() -> ObstacleField:
