@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, dataclass, replace
+from datetime import datetime, timezone
 import json
 from pathlib import Path
+import platform
+import subprocess
 import sys
 import time
 
@@ -36,6 +39,7 @@ DEFAULT_DEADLOCK_PROGRESS_TOLERANCE = 0.02
 class TrialResult:
     trial: int
     field_seed: int
+    controller_seed: int
     robot: str
     algo: str
     obstacle_count: int
@@ -45,6 +49,7 @@ class TrialResult:
     steps: int
     final_error: float
     min_exact_clearance: float
+    min_continuous_clearance: float | None
     sampled_min_clearance: float
     best_rollout_min_clearance: float
     first_sample_collision_step: int | None
@@ -70,6 +75,30 @@ def parse_args() -> argparse.Namespace:
         "--nsdf",
         action="store_true",
         help="Use the matching pretrained neural SDF. This is supported only with --algo brmppi.",
+    )
+    parser.add_argument(
+        "--nsdf-variant",
+        choices=("legacy", "retrained"),
+        default="retrained",
+        help="Checkpoint family selected by --nsdf (default: retrained).",
+    )
+    parser.add_argument(
+        "--mobile-nsdf-points",
+        type=int,
+        default=64,
+        help="Mobile-arm obstacle-boundary stencil size for retrained NSDF inference.",
+    )
+    parser.add_argument(
+        "--mobile-nsdf-narrow-points",
+        type=int,
+        default=4,
+        help="Nearest mobile-arm surface samples evaluated by each learned narrow phase.",
+    )
+    parser.add_argument(
+        "--mobile-nsdf-analytic-guard",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Conservatively cap mobile-arm learned barriers with exact broad-phase clearance.",
     )
     parser.add_argument(
         "--tuned-config",
@@ -120,19 +149,54 @@ def main() -> None:
             f"--nsdf is only implemented for brmppi, not {args.algo}. "
             "Select --algo brmppi when benchmarking the neural SDF."
         )
+    if args.trials <= 0:
+        raise ValueError("--trials must be positive")
 
     defaults = ROBOT_DEFAULTS[args.robot]
     use_tuned_config = args.tuned_config if args.tuned_config is not None else args.algo == "brmppi"
-    max_steps = args.max_steps or defaults["max_steps"]
-    min_obstacles = args.min_obstacles or defaults["min_obstacles"]
-    max_obstacles = args.max_obstacles or defaults["max_obstacles"]
+    max_steps = defaults["max_steps"] if args.max_steps is None else args.max_steps
+    min_obstacles = (
+        defaults["min_obstacles"]
+        if args.min_obstacles is None
+        else args.min_obstacles
+    )
+    max_obstacles = (
+        defaults["max_obstacles"]
+        if args.max_obstacles is None
+        else args.max_obstacles
+    )
+    if max_steps <= 0:
+        raise ValueError("--max-steps must be positive")
     if min_obstacles <= 0 or max_obstacles < min_obstacles:
         raise ValueError("--min-obstacles must be positive and <= --max-obstacles")
+    if args.deadlock_window < 0:
+        raise ValueError("--deadlock-window must be nonnegative")
+    if (
+        args.deadlock_position_tolerance < 0.0
+        or args.deadlock_progress_tolerance < 0.0
+    ):
+        raise ValueError("deadlock tolerances must be nonnegative")
 
     algos = ALGORITHMS if args.algo == "all" else (args.algo,)
     configs = resolve_benchmark_configs(args, algos, use_tuned_config=use_tuned_config)
-    sdf_model = load_benchmark_sdf(args.robot, nsdf=args.nsdf)
+    sdf_model = load_benchmark_sdf(
+        args.robot,
+        nsdf=args.nsdf,
+        variant=args.nsdf_variant,
+        mobile_points=args.mobile_nsdf_points,
+        mobile_narrow_points=args.mobile_nsdf_narrow_points,
+        mobile_analytic_guard=args.mobile_nsdf_analytic_guard,
+    )
     barrier_source = "neural_sdf" if sdf_model is not None else "analytic_sdf"
+    barrier_implementation = (
+        "analytic_sdf"
+        if sdf_model is None
+        else (
+            "guarded_analytic_neural_hybrid"
+            if args.robot == "mobile_arm" and args.mobile_nsdf_analytic_guard
+            else "neural_sdf"
+        )
+    )
     run_parameters = {
         algo: {
             "horizon": configs[algo].horizon if configs[algo] is not None else (args.horizon or defaults["horizon"]),
@@ -143,6 +207,8 @@ def main() -> None:
     }
     robot = create_robot(args.robot)
     results: list[TrialResult] = []
+    runtime = runtime_provenance()
+    benchmark_started_utc = datetime.now(timezone.utc).isoformat()
 
     for trial in range(args.trials):
         field_seed = args.seed + trial
@@ -185,16 +251,36 @@ def main() -> None:
                 print_trial_result(result)
 
     report = {
+        "schema_version": 2,
         "settings": {
             "robot": args.robot,
             "algos": list(algos),
             "trials": args.trials,
             "barrier_source": barrier_source,
+            "barrier_implementation": barrier_implementation,
             "pretrained_sdf": None if sdf_model is None else sdf_model.description,
+            "nsdf_variant": args.nsdf_variant if sdf_model is not None else None,
+            "nsdf_provenance": (
+                None
+                if sdf_model is None
+                else dict(getattr(sdf_model, "provenance", {}))
+            ),
             "tuned_config": use_tuned_config,
             "run_parameters": run_parameters,
             "configs": {
-                algo: asdict(config) if config is not None else None for algo, config in configs.items()
+                algo: (
+                    asdict(config)
+                    if config is not None
+                    else asdict(
+                        MPPIConfig(
+                            horizon=run_parameters[algo]["horizon"],
+                            samples=run_parameters[algo]["samples"],
+                            dt=run_parameters[algo]["dt"],
+                            plot_samples=0,
+                        )
+                    )
+                )
+                for algo, config in configs.items()
             },
             "max_steps": max_steps,
             "seed": args.seed,
@@ -208,6 +294,11 @@ def main() -> None:
             "deadlock_position_tolerance": args.deadlock_position_tolerance,
             "deadlock_progress_tolerance": args.deadlock_progress_tolerance,
             "warmup_excluded_from_timing": args.warmup,
+            "command_timing_scope": "controller.command plus device synchronization",
+            "wall_seconds_includes_benchmark_diagnostics": True,
+            "benchmark_started_utc": benchmark_started_utc,
+            "benchmark_finished_utc": datetime.now(timezone.utc).isoformat(),
+            "runtime": runtime,
         },
         "summary": summarize_results(results),
         "results": [asdict(result) for result in results],
@@ -218,10 +309,14 @@ def main() -> None:
         args.robot,
         algos,
         barrier_source=barrier_source,
+        nsdf_variant=args.nsdf_variant if sdf_model is not None else None,
         tuned_config=use_tuned_config,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    output_path.write_text(
+        json.dumps(report, indent=2, default=json_default),
+        encoding="utf-8",
+    )
 
     print_summary(report["summary"])
     print(f"results={output_path}")
@@ -249,13 +344,32 @@ def resolve_benchmark_configs(
     }
 
 
-def load_benchmark_sdf(robot_name: str, *, nsdf: bool):
+def load_benchmark_sdf(
+    robot_name: str,
+    *,
+    nsdf: bool,
+    variant: str = "legacy",
+    mobile_points: int = 64,
+    mobile_narrow_points: int = 4,
+    mobile_analytic_guard: bool = True,
+):
     if not nsdf:
         return None
     try:
-        return load_pretrained_sdf_for_robot(robot_name, repo_root=REPO_ROOT)
+        model = load_pretrained_sdf_for_robot(
+            robot_name,
+            repo_root=REPO_ROOT,
+            variant=variant,
+            mobile_arm_points_per_obstacle=mobile_points,
+            mobile_arm_narrow_phase_points=mobile_narrow_points,
+        )
+        if robot_name == "mobile_arm":
+            model.analytic_guard = mobile_analytic_guard
+        return model
     except PretrainedSDFUnavailable as exc:
-        raise NotImplementedError(f"--nsdf is not implemented for {robot_name}: {exc}") from exc
+        raise NotImplementedError(
+            f"--nsdf --nsdf-variant {variant} is not implemented for {robot_name}: {exc}"
+        ) from exc
 
 
 def random_obstacle_field(
@@ -407,6 +521,7 @@ def run_trial(
 
     state = robot.default_state.copy()
     min_exact_clearance = exact_clearance(field, robot, state)
+    min_continuous_clearance = continuous_geometry_clearance(field, robot, state)
     min_sampled_rollout_clearance = float("inf")
     min_best_rollout_clearance = float("inf")
     max_sampled_collision_fraction = 0.0
@@ -448,6 +563,17 @@ def run_trial(
         goal_distance_history.append(goal_distance)
         current_clearance = exact_clearance(field, robot, state)
         min_exact_clearance = min(min_exact_clearance, current_clearance)
+        current_continuous_clearance = continuous_geometry_clearance(
+            field,
+            robot,
+            state,
+        )
+        if current_continuous_clearance is not None:
+            assert min_continuous_clearance is not None
+            min_continuous_clearance = min(
+                min_continuous_clearance,
+                current_continuous_clearance,
+            )
         if current_clearance < 0.0:
             collision = True
             break
@@ -469,6 +595,7 @@ def run_trial(
     return TrialResult(
         trial=trial,
         field_seed=field_seed,
+        controller_seed=controller_seed,
         robot=robot.name,
         algo=algo,
         obstacle_count=len(field.obstacles),
@@ -478,6 +605,11 @@ def run_trial(
         steps=steps_run,
         final_error=final_error,
         min_exact_clearance=float(min_exact_clearance),
+        min_continuous_clearance=(
+            None
+            if min_continuous_clearance is None
+            else float(min_continuous_clearance)
+        ),
         sampled_min_clearance=float(min_sampled_rollout_clearance),
         best_rollout_min_clearance=float(min_best_rollout_clearance),
         first_sample_collision_step=first_sample_collision_step,
@@ -521,6 +653,56 @@ def exact_clearance(field: ObstacleField, robot, state: jnp.ndarray) -> float:
     return float(jnp.min(field.signed_distance(robot.body_points(state))) - robot.body_point_radius)
 
 
+def continuous_geometry_clearance(
+    field: ObstacleField,
+    robot,
+    state: jnp.ndarray,
+) -> float | None:
+    """Exact circle clearance to the mobile arm's continuous rectangle union.
+
+    The benchmark's historical outcome metric remains ``exact_clearance`` so
+    old analytic reports stay paired and comparable. This additional metric
+    exposes the small geometry difference between sampled body points and the
+    continuous base/link rectangles used by the compositional NSDF.
+    """
+    if robot.name != "mobile_arm":
+        return None
+    polygons = jnp.concatenate(
+        (
+            robot.base_polygon(state)[None, :, :],
+            robot.link_polygons(state),
+        ),
+        axis=0,
+    )
+    polygon_centers = jnp.mean(polygons, axis=1)
+    x_edges = polygons[:, 1] - polygons[:, 0]
+    y_edges = polygons[:, 3] - polygons[:, 0]
+    x_lengths = jnp.linalg.norm(x_edges, axis=1)
+    y_lengths = jnp.linalg.norm(y_edges, axis=1)
+    x_axes = x_edges / x_lengths[:, None]
+    y_axes = y_edges / y_lengths[:, None]
+    half_extents = 0.5 * jnp.stack((x_lengths, y_lengths), axis=1)
+
+    delta = field.centers[:, None, :] - polygon_centers[None, :, :]
+    local = jnp.stack(
+        (
+            jnp.einsum("opi,pi->op", delta, x_axes),
+            jnp.einsum("opi,pi->op", delta, y_axes),
+        ),
+        axis=2,
+    )
+    offset = jnp.abs(local) - half_extents[None, :, :]
+    outside = jnp.linalg.norm(jnp.maximum(offset, 0.0), axis=2)
+    inside = jnp.minimum(jnp.maximum(offset[:, :, 0], offset[:, :, 1]), 0.0)
+    center_to_part = outside + inside
+    obstacle_clearance = (
+        jnp.min(center_to_part, axis=1)
+        - field.radii
+        - robot.body_point_radius
+    )
+    return float(jnp.min(obstacle_clearance))
+
+
 def timing_stats_ms(times: list[float]) -> tuple[float, float]:
     if not times:
         return 0.0, 0.0
@@ -529,11 +711,14 @@ def timing_stats_ms(times: list[float]) -> tuple[float, float]:
     return 1000.0 * sum(times) / len(times), 1000.0 * ordered[p95_index]
 
 
-def summarize_results(results: list[TrialResult]) -> list[dict[str, float | int | str]]:
+def summarize_results(results: list[TrialResult]) -> list[dict[str, object]]:
     summary = []
     for algo in sorted({result.algo for result in results}):
         rows = [result for result in results if result.algo == algo]
         count = len(rows)
+        has_continuous_clearance = any(
+            result.min_continuous_clearance is not None for result in rows
+        )
         summary.append(
             {
                 "algo": algo,
@@ -546,8 +731,29 @@ def summarize_results(results: list[TrialResult]) -> list[dict[str, float | int 
                 "collision_rate": sum(result.collision for result in rows) / count,
                 "mean_steps": sum(result.steps for result in rows) / count,
                 "mean_command_ms": sum(result.mean_command_ms for result in rows) / count,
+                "mean_trial_p95_command_ms": (
+                    sum(result.p95_command_ms for result in rows) / count
+                ),
                 "mean_final_error": sum(result.final_error for result in rows) / count,
                 "worst_min_clearance": min(result.min_exact_clearance for result in rows),
+                "continuous_collisions": (
+                    sum(
+                        result.min_continuous_clearance is not None
+                        and result.min_continuous_clearance < 0.0
+                        for result in rows
+                    )
+                    if has_continuous_clearance
+                    else None
+                ),
+                "worst_continuous_clearance": (
+                    min(
+                        result.min_continuous_clearance
+                        for result in rows
+                        if result.min_continuous_clearance is not None
+                    )
+                    if has_continuous_clearance
+                    else None
+                ),
             }
         )
     return summary
@@ -555,20 +761,33 @@ def summarize_results(results: list[TrialResult]) -> list[dict[str, float | int 
 
 def print_trial_result(result: TrialResult) -> None:
     status = "reached" if result.reached else ("collision" if result.collision else ("deadlock" if result.deadlock else "timeout"))
+    continuous = (
+        ""
+        if result.min_continuous_clearance is None
+        else f" continuous={result.min_continuous_clearance:+.3f}"
+    )
     print(
         f"trial={result.trial:03d} seed={result.field_seed} "
         f"algo={result.algo:12s} robot={result.robot:18s} source={result.barrier_source:12s} status={status:9s} "
         f"steps={result.steps:4d} obs={result.obstacle_count:2d} "
-        f"min_clear={result.min_exact_clearance:+.3f} "
+        f"min_clear={result.min_exact_clearance:+.3f}{continuous} "
         f"final_error={result.final_error:.2f} mean={result.mean_command_ms:.2f}ms",
         flush=True,
     )
 
 
-def print_summary(summary: list[dict[str, float | int | str]]) -> None:
-    print("algo | trials | reached | collisions | timeouts | deadlocks | success | collision | mean_ms | mean_steps | worst_clear")
-    print("--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---:")
+def print_summary(summary: list[dict[str, object]]) -> None:
+    print(
+        "algo | trials | reached | collisions | timeouts | deadlocks | success | "
+        "collision | continuous_collisions | mean_ms | trial_p95_ms | mean_steps | "
+        "worst_clear | worst_continuous"
+    )
+    print(
+        "--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | "
+        "---: | ---: | ---: | ---:"
+    )
     for row in summary:
+        continuous = row["worst_continuous_clearance"]
         print(
             " | ".join(
                 (
@@ -580,9 +799,20 @@ def print_summary(summary: list[dict[str, float | int | str]]) -> None:
                     str(row["deadlocks"]),
                     f"{float(row['success_rate']):.3f}",
                     f"{float(row['collision_rate']):.3f}",
+                    (
+                        "n/a"
+                        if row["continuous_collisions"] is None
+                        else str(row["continuous_collisions"])
+                    ),
                     f"{float(row['mean_command_ms']):.2f}",
+                    f"{float(row['mean_trial_p95_command_ms']):.2f}",
                     f"{float(row['mean_steps']):.1f}",
                     f"{float(row['worst_min_clearance']):+.3f}",
+                    (
+                        "n/a"
+                        if continuous is None
+                        else f"{float(continuous):+.3f}"
+                    ),
                 )
             )
         )
@@ -593,16 +823,70 @@ def default_output_path(
     algos: tuple[str, ...],
     *,
     barrier_source: str = "analytic_sdf",
+    nsdf_variant: str | None = None,
     tuned_config: bool = False,
 ) -> Path:
     stamp = time.strftime("%Y%m%d_%H%M%S")
     algo_label = "all" if len(algos) > 1 else algos[0]
     config_label = "tuned" if tuned_config else "default"
+    source_label = (
+        f"{barrier_source}_{nsdf_variant}"
+        if barrier_source == "neural_sdf" and nsdf_variant is not None
+        else barrier_source
+    )
     return (
         Path("output")
         / "benchmarks"
-        / f"random_obstacles_{robot_name}_{algo_label}_{barrier_source}_{config_label}_{stamp}.json"
+        / f"random_obstacles_{robot_name}_{algo_label}_{source_label}_{config_label}_{stamp}.json"
     )
+
+
+def runtime_provenance() -> dict[str, object]:
+    revision = _git_output("rev-parse", "HEAD")
+    dirty_output = _git_output("status", "--porcelain")
+    return {
+        "git_revision": revision,
+        "git_dirty": None if dirty_output is None else bool(dirty_output),
+        "python_version": platform.python_version(),
+        "platform": platform.platform(),
+        "numpy_version": str(np.__version__),
+        "jax_version": str(jax.__version__),
+        "jaxlib_version": str(jax.lib.__version__),
+        "jax_backend": str(jax.default_backend()),
+        "jax_devices": [
+            {
+                "platform": str(device.platform),
+                "device_kind": str(device.device_kind),
+                "id": int(device.id),
+            }
+            for device in jax.devices()
+        ],
+    }
+
+
+def _git_output(*args: str) -> str | None:
+    try:
+        completed = subprocess.run(
+            ("git", *args),
+            cwd=REPO_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
+    return completed.stdout.strip() if completed.returncode == 0 else None
+
+
+def json_default(value):
+    """Convert common provenance scalar/array types to JSON primitives."""
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, (np.ndarray, jax.Array)):
+        return np.asarray(value).tolist()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
 if __name__ == "__main__":

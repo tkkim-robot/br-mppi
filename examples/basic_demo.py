@@ -41,6 +41,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--algo", "--method", choices=ALGORITHMS, default="brmppi")
     parser.add_argument("--robot", "--dynamics", choices=tuple(sorted(ROBOT_REGISTRY)), default="unicycle")
     parser.add_argument("--nsdf", action="store_true", help="Use the pretrained neural signed distance model for h.")
+    parser.add_argument(
+        "--nsdf-variant",
+        choices=("legacy", "retrained"),
+        default="retrained",
+        help="Checkpoint family selected by --nsdf (default: retrained).",
+    )
+    parser.add_argument("--mobile-nsdf-points", type=int, default=64)
+    parser.add_argument("--mobile-nsdf-narrow-points", type=int, default=4)
+    parser.add_argument(
+        "--mobile-nsdf-analytic-guard",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
     parser.add_argument("--steps", type=int, default=None, help="Simulation steps. Default depends on the robot.")
     parser.add_argument("--horizon", type=int, default=None, help="MPPI rollout horizon. Default depends on the robot.")
     parser.add_argument("--samples", type=int, default=None, help="Number of MPPI samples. Default depends on the robot.")
@@ -77,7 +90,16 @@ def apply_demo_defaults(args: argparse.Namespace) -> None:
             setattr(args, key, value)
 
 
-def load_selected_sdf(robot_name: str, algo: str, *, nsdf: bool):
+def load_selected_sdf(
+    robot_name: str,
+    algo: str,
+    *,
+    nsdf: bool,
+    variant: str = "legacy",
+    mobile_points: int = 64,
+    mobile_narrow_points: int = 4,
+    mobile_analytic_guard: bool = True,
+):
     if not nsdf:
         return None
     if algo != "brmppi":
@@ -86,9 +108,20 @@ def load_selected_sdf(robot_name: str, algo: str, *, nsdf: bool):
             "Run this method without --nsdf or select --algo brmppi."
         )
     try:
-        return load_pretrained_sdf_for_robot(robot_name, repo_root=REPO_ROOT)
+        model = load_pretrained_sdf_for_robot(
+            robot_name,
+            repo_root=REPO_ROOT,
+            variant=variant,
+            mobile_arm_points_per_obstacle=mobile_points,
+            mobile_arm_narrow_phase_points=mobile_narrow_points,
+        )
+        if robot_name == "mobile_arm":
+            model.analytic_guard = mobile_analytic_guard
+        return model
     except PretrainedSDFUnavailable as exc:
-        raise NotImplementedError(f"--nsdf is not implemented for {robot_name}: {exc}") from exc
+        raise NotImplementedError(
+            f"--nsdf --nsdf-variant {variant} is not implemented for {robot_name}: {exc}"
+        ) from exc
 
 
 def main() -> None:
@@ -99,7 +132,15 @@ def main() -> None:
 
     robot = create_robot(args.robot)
     field = default_obstacle_field(robot.name)
-    sdf_model = load_selected_sdf(robot.name, args.algo, nsdf=args.nsdf)
+    sdf_model = load_selected_sdf(
+        robot.name,
+        args.algo,
+        nsdf=args.nsdf,
+        variant=args.nsdf_variant,
+        mobile_points=args.mobile_nsdf_points,
+        mobile_narrow_points=args.mobile_nsdf_narrow_points,
+        mobile_analytic_guard=args.mobile_nsdf_analytic_guard,
+    )
     if sdf_model is not None:
         print(f"pretrained_sdf={sdf_model.description}")
     config = MPPIConfig(horizon=args.horizon, samples=args.samples, dt=args.dt, plot_samples=args.plot_samples)
@@ -173,7 +214,11 @@ def main() -> None:
     elif should_show_animation:
         show_animation(field, robot, trajectory_arr, sampled_rollouts, best_rollouts, goal, args, bounds, collision_index)
 
-    print(f"algo={args.algo} robot={args.robot} nsdf={args.nsdf} barrier_source={controller.barrier_source}")
+    print(
+        f"algo={args.algo} robot={args.robot} nsdf={args.nsdf} "
+        f"nsdf_variant={args.nsdf_variant if args.nsdf else 'none'} "
+        f"barrier_source={controller.barrier_source}"
+    )
     print(f"reached={reached} collision={collision} steps={len(trajectory_arr) - 1}")
     print(f"final_error={final_error:.3f} min_exact_clearance={min_exact_clearance:.3f}")
     print(
@@ -246,12 +291,12 @@ def plot_demo(
 
 
 def default_plot_path(args) -> Path:
-    suffix = "_nsdf" if args.nsdf else ""
+    suffix = f"_nsdf_{args.nsdf_variant}" if args.nsdf else ""
     return Path("output") / f"{robot_shorthand(args.robot)}_{args.algo}{suffix}.png"
 
 
 def default_animation_path(args) -> Path:
-    suffix = "_nsdf" if args.nsdf else ""
+    suffix = f"_nsdf_{args.nsdf_variant}" if args.nsdf else ""
     return Path("output") / "animations" / f"{robot_shorthand(args.robot)}_{args.algo}{suffix}.mp4"
 
 

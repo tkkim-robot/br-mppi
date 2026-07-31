@@ -1,0 +1,215 @@
+{
+  "architecture": {
+    "dtype": "float32",
+    "hidden_dim": 16,
+    "input_dim": 3,
+    "layer_order": [
+      "Dense_0",
+      "Dense_1",
+      "softplus",
+      "Dense_2",
+      "softplus",
+      "Dense_3"
+    ],
+    "name": "legacy_sdfnet_4x16",
+    "output_dim": 1
+  },
+  "checkpoint": {
+    "file": "link7_retrained_model_4_16.npy",
+    "sha256": "da1acd5be2501f55d5d9f8784825220990f6b82d70977dd696e98953242f5bec"
+  },
+  "comparison": {
+    "reference_checkpoint": "sdf/trained_models/link7_model_4_16.npy",
+    "reference_validation": {
+      "boundary_bias": 0.03056595226553327,
+      "boundary_mae": 0.032565102623266284,
+      "boundary_max_abs_error": 0.08265967667102814,
+      "boundary_validation_points": 8192,
+      "collision_max_overestimation": 0.12148714065551758,
+      "collision_points": 16017,
+      "contact_shell": {
+        "cases": [
+          {
+            "barrier_bias": -0.005914540015510283,
+            "barrier_mae": 0.02294924897432793,
+            "canonical_exact_distance": 0.28,
+            "exact_contact_max_abs_error": 5.960464477539063e-08,
+            "max_overestimation": 0.03218075633049011,
+            "max_underestimation": 0.055526480078697205,
+            "points": 2048,
+            "positive_fraction_at_contact": 0.48486328125,
+            "radius": 0.28,
+            "scale": 1.0
+          },
+          {
+            "barrier_bias": -0.001896759174996987,
+            "barrier_mae": 0.009630592685425654,
+            "canonical_exact_distance": 0.62,
+            "exact_contact_max_abs_error": 5.960464477539063e-08,
+            "max_overestimation": 0.015567958354949951,
+            "max_underestimation": 0.029246926307678223,
+            "points": 2048,
+            "positive_fraction_at_contact": 0.53369140625,
+            "radius": 0.62,
+            "scale": 1.0
+          }
+        ],
+        "description": "scaled_network(center / scale) - circle_radius at exact contact",
+        "max_overestimation": 0.03218075633049011
+      },
+      "distance_bias": 0.029302640148759263,
+      "distance_mae": 0.03322509698422558,
+      "distance_max_abs_error": 0.12148714065551758,
+      "distance_rmse": 0.042032327066300244,
+      "eikonal_abs_error_max": 0.9903281477087906,
+      "eikonal_abs_error_mean": 0.3792826876554864,
+      "false_collision_count": 595,
+      "false_collision_rate": 0.03723404255319149,
+      "false_safe_count": 9039,
+      "false_safe_rate": 0.5643378909908222,
+      "free_points": 15980,
+      "gradient_cosine_mean": 0.868862090461802,
+      "gradient_l2_error_mean": 0.5172215656233038,
+      "near_surface_band": 0.028000000000000004,
+      "near_surface_mae": 0.03317098075938698,
+      "near_surface_max_abs_error": 0.08387377858161926,
+      "near_surface_max_overestimation": 0.08387377858161926,
+      "near_surface_points": 34301,
+      "recommended_conservative_margin": 0.08387377858161926,
+      "sign_accuracy": 0.6989092727443198,
+      "validation_points": 48000,
+      "z_gradient_abs_mean": 0.6490806719074026
+    },
+    "trained_minus_reference": {
+      "boundary_mae": -0.028599152643437264,
+      "distance_mae": -0.028508478139257325,
+      "eikonal_abs_error_mean": -0.30945027757744215,
+      "false_safe_rate": -0.48311169382531055,
+      "gradient_l2_error_mean": -0.34302985165175015,
+      "near_surface_mae": -0.029238361752497402
+    }
+  },
+  "format_version": 1,
+  "geometry": {
+    "height": 0.28,
+    "name": "link7_quadrotor_rectangle",
+    "type": "axis_aligned_rectangle",
+    "units": "m",
+    "width": 0.56
+  },
+  "provenance": {
+    "jax_backend": "gpu",
+    "jax_version": "0.7.1",
+    "promoted_from": "output/nsdf_training/candidates/link7_model_4x16_seed2.npy",
+    "source_revision": "522de616ad0a28bce56e255852c2efd2f2f25255"
+  },
+  "training": {
+    "config": {
+      "adam_beta1": 0.9,
+      "adam_beta2": 0.999,
+      "adam_epsilon": 1e-08,
+      "batch_size": 1536,
+      "boundary_validation_points": 8192,
+      "contact_shell_points": 2048,
+      "contact_shell_radii": [
+        0.28,
+        0.62
+      ],
+      "contact_shell_scales": [
+        1.0
+      ],
+      "domain_padding": 1.0,
+      "eikonal_batch_size": 512,
+      "eikonal_weight": 0.01,
+      "gradient_clip_norm": 10.0,
+      "hidden_dim": 16,
+      "learning_rate": 0.001,
+      "log_every": 30000,
+      "min_learning_rate_ratio": 0.1,
+      "near_surface_band": null,
+      "seed": 2,
+      "steps": 30000,
+      "validation_points": 48000
+    },
+    "loss_history": [
+      {
+        "distance_mse": 3.9819908142089844,
+        "eikonal_loss": 0.729709267616272,
+        "gradient_norm": 16.494583129882812,
+        "learning_rate": 0.0010000000474974513,
+        "loss": 3.989287853240967,
+        "step": 1
+      },
+      {
+        "distance_mse": 4.369768430478871e-05,
+        "eikonal_loss": 0.013508816249668598,
+        "gradient_norm": 0.035373784601688385,
+        "learning_rate": 0.00010000000474974513,
+        "loss": 0.00017878584912978113,
+        "step": 30000
+      }
+    ],
+    "objective": "distance_mse + eikonal_weight * planar_xy_eikonal",
+    "sampling": "equal uniform_balanced_sign / near_surface / boundary"
+  },
+  "validation": {
+    "boundary_bias": 0.0017449676415708382,
+    "boundary_mae": 0.00396594997982902,
+    "boundary_max_abs_error": 0.025886397808790207,
+    "boundary_validation_points": 8192,
+    "collision_max_overestimation": 0.025780867785215378,
+    "collision_points": 16017,
+    "contact_shell": {
+      "cases": [
+        {
+          "barrier_bias": 0.002846256727934815,
+          "barrier_mae": 0.009325318082119338,
+          "canonical_exact_distance": 0.28,
+          "exact_contact_max_abs_error": 5.960464477539063e-08,
+          "max_overestimation": 0.026043713092803955,
+          "max_underestimation": 0.01941472291946411,
+          "points": 2048,
+          "positive_fraction_at_contact": 0.626953125,
+          "radius": 0.28,
+          "scale": 1.0
+        },
+        {
+          "barrier_bias": 0.004559147841064259,
+          "barrier_mae": 0.007581701298477128,
+          "canonical_exact_distance": 0.62,
+          "exact_contact_max_abs_error": 5.960464477539063e-08,
+          "max_overestimation": 0.019332289695739746,
+          "max_underestimation": 0.020153522491455078,
+          "points": 2048,
+          "positive_fraction_at_contact": 0.7412109375,
+          "radius": 0.62,
+          "scale": 1.0
+        }
+      ],
+      "description": "scaled_network(center / scale) - circle_radius at exact contact",
+      "max_overestimation": 0.026043713092803955
+    },
+    "distance_bias": 0.0014291265821963558,
+    "distance_mae": 0.004716618844968252,
+    "distance_max_abs_error": 0.03651320934295654,
+    "distance_rmse": 0.006991689545477708,
+    "eikonal_abs_error_max": 0.9700182126349919,
+    "eikonal_abs_error_mean": 0.06983241007804422,
+    "false_collision_count": 360,
+    "false_collision_rate": 0.02252816020025031,
+    "false_safe_count": 1301,
+    "false_safe_rate": 0.08122619716551165,
+    "free_points": 15980,
+    "gradient_cosine_mean": 0.9652958513696943,
+    "gradient_l2_error_mean": 0.17419171397155367,
+    "near_surface_band": 0.028000000000000004,
+    "near_surface_mae": 0.003932619006889579,
+    "near_surface_max_abs_error": 0.026215773075819016,
+    "near_surface_max_overestimation": 0.026215773075819016,
+    "near_surface_points": 34301,
+    "recommended_conservative_margin": 0.026215773075819016,
+    "sign_accuracy": 0.9480888833328125,
+    "validation_points": 48000,
+    "z_gradient_abs_mean": 0.0621377083233189
+  }
+}

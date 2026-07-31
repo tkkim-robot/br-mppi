@@ -22,6 +22,7 @@ class SanityResult:
     robot: str
     algo: str
     nsdf: bool
+    nsdf_variant: str | None
     barrier_source: str
     reached: bool
     collision: bool
@@ -42,6 +43,19 @@ def parse_args() -> argparse.Namespace:
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--nsdf", action="store_true", help="Run only the pretrained neural-SDF barrier case.")
     source.add_argument("--include-nsdf", action="store_true", help="Run both analytic and neural-SDF barrier cases.")
+    parser.add_argument(
+        "--nsdf-variant",
+        choices=("legacy", "retrained"),
+        default="retrained",
+        help="Checkpoint family selected for neural-SDF cases.",
+    )
+    parser.add_argument("--mobile-nsdf-points", type=int, default=64)
+    parser.add_argument("--mobile-nsdf-narrow-points", type=int, default=4)
+    parser.add_argument(
+        "--mobile-nsdf-analytic-guard",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
     parser.add_argument("--steps", type=int, default=500)
     parser.add_argument("--horizon", type=int, default=12)
     parser.add_argument("--samples", type=int, default=16)
@@ -62,9 +76,20 @@ def run_case(args: argparse.Namespace, *, nsdf: bool) -> SanityResult:
                 "Run this method without --nsdf or select --algo brmppi."
             )
         try:
-            sdf_model = load_pretrained_sdf_for_robot(robot.name, repo_root=REPO_ROOT)
+            sdf_model = load_pretrained_sdf_for_robot(
+                robot.name,
+                repo_root=REPO_ROOT,
+                variant=args.nsdf_variant,
+                mobile_arm_points_per_obstacle=args.mobile_nsdf_points,
+                mobile_arm_narrow_phase_points=args.mobile_nsdf_narrow_points,
+            )
+            if robot.name == "mobile_arm":
+                sdf_model.analytic_guard = args.mobile_nsdf_analytic_guard
         except PretrainedSDFUnavailable as exc:
-            raise NotImplementedError(f"--nsdf is not implemented for {robot.name}: {exc}") from exc
+            raise NotImplementedError(
+                f"--nsdf --nsdf-variant {args.nsdf_variant} is not implemented "
+                f"for {robot.name}: {exc}"
+            ) from exc
 
     config = MPPIConfig(
         horizon=args.horizon,
@@ -117,6 +142,7 @@ def run_case(args: argparse.Namespace, *, nsdf: bool) -> SanityResult:
         robot=robot.name,
         algo=args.algo,
         nsdf=nsdf,
+        nsdf_variant=args.nsdf_variant if nsdf else None,
         barrier_source=controller.barrier_source,
         reached=reached,
         collision=collision,
@@ -151,7 +177,12 @@ def print_table(results: list[SanityResult]) -> None:
     print(" | ".join(header))
     print(" | ".join("---" for _ in header))
     for result in results:
-        case = f"{result.algo}/{result.robot}/{result.barrier_source}"
+        source = (
+            f"{result.barrier_source}:{result.nsdf_variant}"
+            if result.nsdf_variant is not None
+            else result.barrier_source
+        )
+        case = f"{result.algo}/{result.robot}/{source}"
         outcome = "reached" if result.reached else ("collision" if result.collision else "timeout")
         print(
             " | ".join(
