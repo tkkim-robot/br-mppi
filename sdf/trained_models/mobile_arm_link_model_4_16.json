@@ -1,0 +1,291 @@
+{
+  "architecture": {
+    "dtype": "float32",
+    "hidden_dim": 16,
+    "input_dim": 3,
+    "layer_order": [
+      "Dense_0",
+      "Dense_1",
+      "softplus",
+      "Dense_2",
+      "softplus",
+      "Dense_3"
+    ],
+    "name": "legacy_sdfnet_4x16",
+    "output_dim": 1
+  },
+  "checkpoint": {
+    "file": "mobile_arm_link_model_4_16.npy",
+    "sha256": "ea1bddcd141a1ffe1c9a8ea61fb7254514baee6f1787d4690e62c1b2c845a095"
+  },
+  "format_version": 1,
+  "geometry": {
+    "height": 0.2,
+    "name": "mobile_arm_canonical_link",
+    "type": "axis_aligned_rectangle",
+    "units": "m",
+    "width": 0.8
+  },
+  "provenance": {
+    "jax_backend": "gpu",
+    "jax_version": "0.7.1",
+    "promoted_from": "output/nsdf_training/pilots/mobile_link_model_4x16_eik1e3_seed0.npy",
+    "source_revision": "522de616ad0a28bce56e255852c2efd2f2f25255"
+  },
+  "training": {
+    "config": {
+      "adam_beta1": 0.9,
+      "adam_beta2": 0.999,
+      "adam_epsilon": 1e-08,
+      "batch_size": 1536,
+      "boundary_validation_points": 8192,
+      "contact_shell_points": 2048,
+      "contact_shell_radii": [
+        0.28,
+        0.62
+      ],
+      "contact_shell_scales": [
+        1.0,
+        0.75,
+        0.5,
+        0.25
+      ],
+      "domain_padding": 1.0,
+      "eikonal_batch_size": 512,
+      "eikonal_weight": 0.001,
+      "gradient_clip_norm": 10.0,
+      "hidden_dim": 16,
+      "learning_rate": 0.001,
+      "log_every": 3000,
+      "min_learning_rate_ratio": 0.1,
+      "near_surface_band": null,
+      "seed": 0,
+      "steps": 30000,
+      "validation_points": 48000
+    },
+    "loss_history": [
+      {
+        "distance_mse": 0.10225432366132736,
+        "eikonal_loss": 0.7992141246795654,
+        "gradient_norm": 0.7444385290145874,
+        "learning_rate": 0.0010000000474974513,
+        "loss": 0.10305353999137878,
+        "step": 1
+      },
+      {
+        "distance_mse": 0.0011752394493669271,
+        "eikonal_loss": 0.23963671922683716,
+        "gradient_norm": 0.07476712018251419,
+        "learning_rate": 0.0009779754327610135,
+        "loss": 0.0014148761983960867,
+        "step": 3000
+      },
+      {
+        "distance_mse": 0.0003626973775681108,
+        "eikonal_loss": 0.1620291918516159,
+        "gradient_norm": 0.022317280992865562,
+        "learning_rate": 0.0009140576585195959,
+        "loss": 0.0005247265798971057,
+        "step": 6000
+      },
+      {
+        "distance_mse": 0.00021422321151476353,
+        "eikonal_loss": 0.08039379119873047,
+        "gradient_norm": 0.012460676021873951,
+        "learning_rate": 0.0008145034080371261,
+        "loss": 0.0002946169988717884,
+        "step": 9000
+      },
+      {
+        "distance_mse": 0.00014938377717044204,
+        "eikonal_loss": 0.06685296446084976,
+        "gradient_norm": 0.04357178881764412,
+        "learning_rate": 0.000689057691488415,
+        "loss": 0.00021623674547299743,
+        "step": 12000
+      },
+      {
+        "distance_mse": 0.00012926346971653402,
+        "eikonal_loss": 0.0686778724193573,
+        "gradient_norm": 0.022266928106546402,
+        "learning_rate": 0.0005499999970197678,
+        "loss": 0.0001979413500521332,
+        "step": 15000
+      },
+      {
+        "distance_mse": 0.00012420056737028062,
+        "eikonal_loss": 0.06015927717089653,
+        "gradient_norm": 0.012085625901818275,
+        "learning_rate": 0.00041094227344729006,
+        "loss": 0.00018435984384268522,
+        "step": 18000
+      },
+      {
+        "distance_mse": 0.00012140622129663825,
+        "eikonal_loss": 0.07995976507663727,
+        "gradient_norm": 0.01077937614172697,
+        "learning_rate": 0.00028549664421007037,
+        "loss": 0.00020136599778197706,
+        "step": 21000
+      },
+      {
+        "distance_mse": 0.00011519522377057001,
+        "eikonal_loss": 0.052205923944711685,
+        "gradient_norm": 0.022558575496077538,
+        "learning_rate": 0.00018594233551993966,
+        "loss": 0.00016740115825086832,
+        "step": 24000
+      },
+      {
+        "distance_mse": 0.00011080660624429584,
+        "eikonal_loss": 0.0591760016977787,
+        "gradient_norm": 0.005539116449654102,
+        "learning_rate": 0.00012202453217469156,
+        "loss": 0.0001699826098047197,
+        "step": 27000
+      },
+      {
+        "distance_mse": 0.00011279977479716763,
+        "eikonal_loss": 0.06303927302360535,
+        "gradient_norm": 0.009756865911185741,
+        "learning_rate": 0.00010000000474974513,
+        "loss": 0.00017583905719220638,
+        "step": 30000
+      }
+    ],
+    "objective": "distance_mse + eikonal_weight * planar_xy_eikonal",
+    "sampling": "equal uniform_balanced_sign / near_surface / boundary"
+  },
+  "validation": {
+    "boundary_bias": -0.0005682542487193132,
+    "boundary_mae": 0.00830902037978376,
+    "boundary_max_abs_error": 0.02950039878487587,
+    "boundary_validation_points": 8192,
+    "collision_max_overestimation": 0.03566061705350876,
+    "collision_points": 16032,
+    "contact_shell": {
+      "cases": [
+        {
+          "barrier_bias": -0.008229130296967924,
+          "barrier_mae": 0.012410836265189573,
+          "canonical_exact_distance": 0.28,
+          "exact_contact_max_abs_error": 5.960464477539063e-08,
+          "max_overestimation": 0.0170232355594635,
+          "max_underestimation": 0.04999232292175293,
+          "points": 2048,
+          "positive_fraction_at_contact": 0.3095703125,
+          "radius": 0.28,
+          "scale": 1.0
+        },
+        {
+          "barrier_bias": -0.0009504576737526804,
+          "barrier_mae": 0.005135622021043673,
+          "canonical_exact_distance": 0.62,
+          "exact_contact_max_abs_error": 5.960464477539063e-08,
+          "max_overestimation": 0.014287948608398438,
+          "max_underestimation": 0.015352249145507812,
+          "points": 2048,
+          "positive_fraction_at_contact": 0.44580078125,
+          "radius": 0.62,
+          "scale": 1.0
+        },
+        {
+          "barrier_bias": -0.006271957870922051,
+          "barrier_mae": 0.00786043047264684,
+          "canonical_exact_distance": 0.37333333333333335,
+          "exact_contact_max_abs_error": 5.960464477539063e-08,
+          "max_overestimation": 0.008809506893157959,
+          "max_underestimation": 0.02937200665473938,
+          "points": 2048,
+          "positive_fraction_at_contact": 0.25146484375,
+          "radius": 0.28,
+          "scale": 0.75
+        },
+        {
+          "barrier_bias": 0.0017268808442167938,
+          "barrier_mae": 0.0037487284280359745,
+          "canonical_exact_distance": 0.8266666666666667,
+          "exact_contact_max_abs_error": 5.960464477539063e-08,
+          "max_overestimation": 0.02246791124343872,
+          "max_underestimation": 0.010015130043029785,
+          "points": 2048,
+          "positive_fraction_at_contact": 0.5546875,
+          "radius": 0.62,
+          "scale": 0.75
+        },
+        {
+          "barrier_bias": -0.0012660417123697698,
+          "barrier_mae": 0.002868277282686904,
+          "canonical_exact_distance": 0.56,
+          "exact_contact_max_abs_error": 5.960464477539063e-08,
+          "max_overestimation": 0.005397826433181763,
+          "max_underestimation": 0.008971452713012695,
+          "points": 2048,
+          "positive_fraction_at_contact": 0.38232421875,
+          "radius": 0.28,
+          "scale": 0.5
+        },
+        {
+          "barrier_bias": -0.005413316626800224,
+          "barrier_mae": 0.010889750410569832,
+          "canonical_exact_distance": 1.24,
+          "exact_contact_max_abs_error": 5.960464477539063e-08,
+          "max_overestimation": 0.02817469835281372,
+          "max_underestimation": 0.03498917818069458,
+          "points": 2048,
+          "positive_fraction_at_contact": 0.3681640625,
+          "radius": 0.62,
+          "scale": 0.5
+        },
+        {
+          "barrier_bias": -0.0009973025444196537,
+          "barrier_mae": 0.0034588405542308465,
+          "canonical_exact_distance": 1.12,
+          "exact_contact_max_abs_error": 2.9802322387695312e-08,
+          "max_overestimation": 0.013106763362884521,
+          "max_underestimation": 0.011144399642944336,
+          "points": 2048,
+          "positive_fraction_at_contact": 0.39990234375,
+          "radius": 0.28,
+          "scale": 0.25
+        },
+        {
+          "barrier_bias": -0.03389363743190188,
+          "barrier_mae": 0.03982267128594685,
+          "canonical_exact_distance": 2.48,
+          "exact_contact_max_abs_error": 5.960464477539063e-08,
+          "max_overestimation": 0.03116774559020996,
+          "max_underestimation": 0.144424170255661,
+          "points": 2048,
+          "positive_fraction_at_contact": 0.212890625,
+          "radius": 0.62,
+          "scale": 0.25
+        }
+      ],
+      "description": "scaled_network(center / scale) - circle_radius at exact contact",
+      "max_overestimation": 0.03116774559020996
+    },
+    "distance_bias": -8.279687357116927e-05,
+    "distance_mae": 0.008141042272686113,
+    "distance_max_abs_error": 0.054461658000946045,
+    "distance_rmse": 0.010263656906411794,
+    "eikonal_abs_error_max": 0.9863382835219334,
+    "eikonal_abs_error_mean": 0.1585117393881814,
+    "false_collision_count": 1871,
+    "false_collision_rate": 0.1171865213578855,
+    "false_safe_count": 1940,
+    "false_safe_rate": 0.12100798403193613,
+    "free_points": 15966,
+    "gradient_cosine_mean": 0.9438791668136688,
+    "gradient_l2_error_mean": 0.2822987572600437,
+    "near_surface_band": 0.020000000000000004,
+    "near_surface_mae": 0.00828783527872122,
+    "near_surface_max_abs_error": 0.029418084770441055,
+    "near_surface_max_overestimation": 0.029418084770441055,
+    "near_surface_points": 33949,
+    "recommended_conservative_margin": 0.03116774559020996,
+    "sign_accuracy": 0.880898806175386,
+    "validation_points": 48000,
+    "z_gradient_abs_mean": 0.212294231065743
+  }
+}

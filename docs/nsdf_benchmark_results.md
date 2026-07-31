@@ -1,119 +1,86 @@
 # BR-MPPI Analytic vs Neural-SDF Benchmark
 
-Previous NSDF run: 2026-07-21
-Optimized NSDF run: 2026-07-22
+## Retrained-checkpoint benchmark (2026-07-30)
 
-## Methodology
+### Methodology
 
-No controller hyperparameters were retuned. For each supported dynamics model, the
-analytic, previous-NSDF, and optimized-NSDF reports contain the exact same saved
-Optuna `best_config`. The NSDF runs use 100 paired random obstacle fields (field seeds
-13-112), controller seeds 7-106, 20 obstacles, a 900-step cap, and identical stopping
-and deadlock settings.
+No controller hyperparameters were retuned. Each neural run loads the same saved
+Optuna `best_config` as its analytic BR-MPPI reference and changes the barrier
+h-function implementation only. The 100 trials use field seeds 13-112, controller
+seeds 7-106, the same robot-specific obstacle count and step cap, and the same
+stopping/deadlock rules.
 
-Each trial performs a synchronized warm-up command and resets the controller before
-starting either timer. Every measured command is also synchronized. Consequently,
-`mean command ms` is steady-state inference latency: JAX compilation/startup is
-excluded from both the command samples and trial wall time.
+Every neural trial performs a synchronized warm-up command, resets the controller,
+and then synchronizes every measured command. JIT compilation and warm-up are
+excluded from `mean command ms` and trial p95. The analytic reports are the existing
+baseline artifacts and were not rerun or replaced. Those older files preserve trial
+and field seeds but predate explicit controller-seed/runtime metadata, so the paired
+report correctly marks artifact-level controller-seed and timing-policy validation
+as unavailable.
 
-The optimized NSDF path changes only neural barrier evaluation:
+The rigid-body neural rows use the retrained `link1` or `link7` model with float32
+MLP evaluation and a direct Jacobian. The mobile-arm row is explicitly a guarded
+analytic/neural hybrid: exact continuous rectangles select and upper-guard the
+learned base/link narrow phase. It is not a pure learned SDF evaluation.
 
-- checkpoint weights, obstacle points, and MLP queries use float32;
-- value-only queries no longer compute unused gradients;
-- projection barriers and their direct MLP Jacobians are evaluated together, then
-  chained through the robot-frame and relative-degree lookahead transforms;
-- sampled obstacle points are cached per complete obstacle field; and
-- the unused post-command BR constraint diagnostic is not recomputed for neural BR-MPPI.
+### All analytic baseline outcomes
 
-The controller and analytic barrier path remain x64. The analytic path retains its
-existing finite-difference Jacobian and post-command diagnostic. Existing analytic
-results were not rerun or replaced; two-command analytic trace fingerprints for all
-three supported dynamics were identical before and after the optimization.
+`R/C/T` means reached/collision/timeout over 100 trials. Deadlocks are included in
+timeouts. These are the finalized analytic h-function results for every method and
+dynamics model.
 
-## Checkpoint coverage
+| dynamics | BR-MPPI | MPPI | Penalty MPPI | MPPI-CBF | Shield MPPI | SC-MPPI | GS-MPPI |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| single integrator | 95/0/5 | 0/100/0 | 86/0/14 | 73/2/25 | 80/13/7 | 2/0/98 | 78/22/0 |
+| unicycle | 87/0/13 | 0/100/0 | 87/5/8 | 12/86/2 | 64/6/30 | 17/1/82 | 64/36/0 |
+| dynamic unicycle | 100/0/0 | 0/100/0 | 100/0/0 | 72/17/11 | 95/1/4 | 10/83/7 | 69/31/0 |
+| planar quadrotor | 98/0/2 | 0/100/0 | 93/0/7 | 64/21/15 | 75/4/21 | 12/3/85 | 74/14/12 |
+| mobile arm | 95/0/5 | 0/100/0 | 95/4/1 | 3/97/0 | 89/10/1 | 17/41/42 | 49/51/0 |
 
-| dynamics | NSDF status | checkpoint / reason |
-| --- | --- | --- |
-| single integrator | unavailable | No matching disk/point checkpoint is present. |
-| unicycle | supported | `link1_model_4_16.npy` (rectangle 1.0 x 0.4) |
-| dynamic unicycle | supported | `link1_model_4_16.npy` (rectangle 1.0 x 0.4) |
-| planar quadrotor | supported | `link7_model_4_16.npy` (rectangle 0.56 x 0.28) |
-| mobile arm | unavailable | No checkpoint represents the composite base plus two articulated four-link arms. |
+### BR-MPPI analytic vs retrained NSDF outcomes
 
-## Outcome and safety results
+Worst clearance uses the shared historical analytic body-point metric. A negative
+value would denote collision. `D` is the number of deadlock timeouts.
 
-`R/C/T` means reached/collision/timeout over 100 trials. Deadlocks (`D`) are a subset
-of timeouts. Worst clearance uses the common analytic body-point metric for every
-source, so negative values denote a collision under the benchmark's shared metric.
-
-| dynamics | barrier source | R/C/T | D | success | mean steps | mean final error | worst clearance |
+| dynamics | barrier h | R/C/T | D | success | mean steps | mean final error | worst clearance |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| single integrator | analytic | 95/0/5 | not recorded | 95% | 218.42 | 0.695 | +0.000002 |
-| single integrator | NSDF | unavailable | — | — | — | — | — |
 | unicycle | analytic | 87/0/13 | 5 | 87% | 226.54 | 1.431 | +0.000002 |
-| unicycle | previous NSDF (x64, finite difference) | 84/8/8 | 0 | 84% | 238.01 | 1.655 | -0.025385 |
-| unicycle | optimized NSDF (f32, direct Jacobian) | 84/11/5 | 0 | 84% | 220.86 | 1.685 | -0.047054 |
+| unicycle | retrained NSDF | 81/0/19 | 11 | 81% | 238.61 | 2.129 | +0.000792 |
 | dynamic unicycle | analytic | 100/0/0 | 0 | 100% | 66.60 | 0.449 | +0.031675 |
-| dynamic unicycle | previous NSDF (x64, finite difference) | 100/0/0 | 0 | 100% | 66.08 | 0.451 | +0.008144 |
-| dynamic unicycle | optimized NSDF (f32, direct Jacobian) | 100/0/0 | 0 | 100% | 66.35 | 0.449 | +0.022144 |
+| dynamic unicycle | retrained NSDF | 97/0/3 | 3 | 97% | 76.24 | 0.449 | +0.106995 |
 | planar quadrotor | analytic | 98/0/2 | 1 | 98% | 204.98 | 0.532 | +0.000392 |
-| planar quadrotor | previous NSDF (x64, finite difference) | 93/1/6 | 0 | 93% | 230.31 | 1.023 | -0.006227 |
-| planar quadrotor | optimized NSDF (f32, direct Jacobian) | 94/0/6 | 0 | 94% | 214.42 | 0.838 | +0.000004 |
+| planar quadrotor | retrained NSDF | 96/0/4 | 3 | 96% | 224.69 | 0.790 | +0.001990 |
 | mobile arm | analytic | 95/0/5 | 0 | 95% | 293.20 | 1.126 | +0.003944 |
-| mobile arm | NSDF | unavailable | — | — | — | — | — |
+| mobile arm | guarded NSDF hybrid | 93/0/7 | 0 | 93% | 333.24 | 1.268 | +0.004507 |
 
-## Runtime results
+The mobile neural run also reports zero continuous-rectangle collisions and a
+worst continuous clearance of `+0.004425 m`. The historical analytic report did
+not record this newer metric, so no paired continuous-geometry delta is claimed.
 
-| supported dynamics | analytic ms | previous NSDF ms | optimized NSDF ms | previous-to-optimized speedup | latency reduction | optimized / analytic |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| unicycle | 38.82 | 179.09 | 18.46 | 9.70x | 89.69% | 0.48x |
-| dynamic unicycle | 47.76 | 204.32 | 18.97 | 10.77x | 90.71% | 0.40x |
-| planar quadrotor | 52.23 | 214.80 | 23.48 | 9.15x | 89.07% | 0.45x |
+### Runtime and paired changes
 
-The optimized aggregate success rates are effectively unchanged from the previous
-NSDF runs: 84% to 84% for unicycle, 100% to 100% for dynamic unicycle, and 93% to
-94% for planar quadrotor. Paired categorical outcomes remained the same on 87, 100,
-and 97 of the 100 seeds, respectively. Unicycle's aggregate success is unchanged but
-its failure composition moved from 8 collisions/8 timeouts to 11 collisions/5
-timeouts, so the speedup should not be interpreted as exact trajectory equivalence.
+| dynamics | analytic mean ms | neural mean ms | analytic p95 ms | neural p95 ms | neural / analytic | speedup | success delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| unicycle | 38.82 | 19.00 | 40.32 | 20.06 | 0.490x | 2.04x | -6 pp |
+| dynamic unicycle | 47.76 | 19.54 | 49.16 | 20.98 | 0.409x | 2.44x | -3 pp |
+| planar quadrotor | 52.23 | 23.20 | 53.95 | 24.21 | 0.444x | 2.25x | -2 pp |
+| mobile arm | 145.27 | 46.64 | 152.29 | 52.80 | 0.321x | 3.12x | -2 pp |
 
-## Interpretation and caveats
+| dynamics | neural success W/L/T vs analytic | exact outcome agreement | collisions introduced/resolved |
+| --- | ---: | ---: | ---: |
+| unicycle | 4/10/86 | 84/100 | 0/0 |
+| dynamic unicycle | 0/3/97 | 97/100 | 0/0 |
+| planar quadrotor | 1/3/96 | 96/100 | 0/0 |
+| mobile arm | 1/3/96 | 96/100 | 0/0 |
 
-The previous NSDF slowdown was an implementation cost, not a JIT warm-up artifact.
-Finite-differencing the neural barrier multiplied MLP evaluations by state dimension,
-and value-only paths also computed gradients that were discarded. Float32 neural
-inference plus the direct Jacobian removes most of that work, reducing steady-state
-latency by 89-91% while preserving aggregate success within one percentage point.
+The retrained h-functions introduce no executed collisions in any of the 400 paired
+trials. They reduce steady-state controller time by 51-68%, but success falls by
+2-6 percentage points because additional trials terminate as timeouts/deadlocks.
+Better pointwise SDF accuracy therefore does not imply identical closed-loop
+behavior: the empirical model margin, float32/direct gradients, nearest-sample ties,
+and the changed h surface all alter BR-MPPI projection and sampling.
 
-The optimized/analytic timing ratio is not a symmetric h-function microbenchmark.
-The optimized neural path omits a post-command constraint diagnostic that BR-MPPI
-does not consume, while the analytic path deliberately retains it so the existing
-analytic baseline has no timing or behavioral side effect. The previous-to-optimized
-NSDF speedup is therefore the primary performance comparison.
-
-`--nsdf` replaces the BR-MPPI barrier-rate h evaluation. Tuned rollout clearance
-shaping, rollout collision rejection, and reported collision checks remain analytic,
-so this is not a fully neural collision-checking pipeline. The analytic footprint also
-subtracts body-point padding (0.08 for the unicycles and 0.06 for planar quadrotor),
-whereas each pretrained NSDF zero level set represents the nominal polygon without
-that padding. Float32 arithmetic, direct rather than forward finite-difference
-gradients, and nearest-point ties can change individual sampled trajectories.
-
-Single integrator and mobile arm remain unavailable rather than failed: this checkout
-does not contain checkpoints for their geometries.
-
-## Raw artifacts
-
-Previous NSDF reports:
-
-- `output/benchmarks/nsdf/unicycle_brmppi_neural_sdf_tuned_100.json`
-- `output/benchmarks/nsdf/dynamic_unicycle_brmppi_neural_sdf_tuned_100.json`
-- `output/benchmarks/nsdf/planar_quadrotor_brmppi_neural_sdf_tuned_100.json`
-
-Optimized NSDF reports:
-
-- `output/benchmarks/nsdf_optimized/unicycle_brmppi_neural_sdf_float32_direct_tuned_100.json`
-- `output/benchmarks/nsdf_optimized/dynamic_unicycle_brmppi_neural_sdf_float32_direct_tuned_100.json`
-- `output/benchmarks/nsdf_optimized/planar_quadrotor_brmppi_neural_sdf_float32_direct_tuned_100.json`
-
-The repository ignores `output/`; this tracked document is the durable result summary.
+The single integrator remains unsupported rather than failed. Its footprint is a
+disk/point model, while the implemented trainer and supplied checkpoints represent
+rectangles. Selecting `--nsdf` for it raises `NotImplementedError` rather than
+silently changing the robot geometry.

@@ -1,0 +1,144 @@
+{
+  "architecture": {
+    "dtype": "float32",
+    "hidden_dim": 16,
+    "input_dim": 3,
+    "layer_order": [
+      "Dense_0",
+      "Dense_1",
+      "softplus",
+      "Dense_2",
+      "softplus",
+      "Dense_3"
+    ],
+    "name": "legacy_sdfnet_4x16",
+    "output_dim": 1
+  },
+  "checkpoint": {
+    "file": "mobile_arm_base_model_4_16.npy",
+    "sha256": "e8f6dd65ebe4acf0fe29dca076fa8aeee1bae3dd50b30d0ce07557df28b5fc30"
+  },
+  "format_version": 1,
+  "geometry": {
+    "height": 1.0,
+    "name": "mobile_arm_base",
+    "type": "axis_aligned_rectangle",
+    "units": "m",
+    "width": 1.5
+  },
+  "provenance": {
+    "jax_backend": "gpu",
+    "jax_version": "0.7.1",
+    "promoted_from": "output/nsdf_training/candidates/mobile_base_model_4x16_seed1.npy",
+    "source_revision": "522de616ad0a28bce56e255852c2efd2f2f25255"
+  },
+  "training": {
+    "config": {
+      "adam_beta1": 0.9,
+      "adam_beta2": 0.999,
+      "adam_epsilon": 1e-08,
+      "batch_size": 1536,
+      "boundary_validation_points": 8192,
+      "contact_shell_points": 2048,
+      "contact_shell_radii": [
+        0.28,
+        0.62
+      ],
+      "contact_shell_scales": [
+        1.0
+      ],
+      "domain_padding": 1.0,
+      "eikonal_batch_size": 512,
+      "eikonal_weight": 0.01,
+      "gradient_clip_norm": 10.0,
+      "hidden_dim": 16,
+      "learning_rate": 0.001,
+      "log_every": 30000,
+      "min_learning_rate_ratio": 0.1,
+      "near_surface_band": null,
+      "seed": 1,
+      "steps": 30000,
+      "validation_points": 48000
+    },
+    "loss_history": [
+      {
+        "distance_mse": 5.084866523742676,
+        "eikonal_loss": 0.7756708264350891,
+        "gradient_norm": 18.56733512878418,
+        "learning_rate": 0.0010000000474974513,
+        "loss": 5.092623233795166,
+        "step": 1
+      },
+      {
+        "distance_mse": 5.2551517001120374e-05,
+        "eikonal_loss": 0.009041829034686089,
+        "gradient_norm": 0.0066080838441848755,
+        "learning_rate": 0.00010000000474974513,
+        "loss": 0.00014296980225481093,
+        "step": 30000
+      }
+    ],
+    "objective": "distance_mse + eikonal_weight * planar_xy_eikonal",
+    "sampling": "equal uniform_balanced_sign / near_surface / boundary"
+  },
+  "validation": {
+    "boundary_bias": -0.0003829174553402481,
+    "boundary_mae": 0.004136987922152002,
+    "boundary_max_abs_error": 0.03116448223590851,
+    "boundary_validation_points": 8192,
+    "collision_max_overestimation": 0.04569080471992493,
+    "collision_points": 16112,
+    "contact_shell": {
+      "cases": [
+        {
+          "barrier_bias": 0.0012288832949707285,
+          "barrier_mae": 0.006248715988476761,
+          "canonical_exact_distance": 0.28,
+          "exact_contact_max_abs_error": 8.940696716308594e-08,
+          "max_overestimation": 0.025132834911346436,
+          "max_underestimation": 0.01911383867263794,
+          "points": 2048,
+          "positive_fraction_at_contact": 0.5380859375,
+          "radius": 0.28,
+          "scale": 1.0
+        },
+        {
+          "barrier_bias": 0.0005843655671924353,
+          "barrier_mae": 0.007420664886012673,
+          "canonical_exact_distance": 0.62,
+          "exact_contact_max_abs_error": 5.960464477539063e-08,
+          "max_overestimation": 0.02064436674118042,
+          "max_underestimation": 0.03411203622817993,
+          "points": 2048,
+          "positive_fraction_at_contact": 0.5380859375,
+          "radius": 0.62,
+          "scale": 1.0
+        }
+      ],
+      "description": "scaled_network(center / scale) - circle_radius at exact contact",
+      "max_overestimation": 0.025132834911346436
+    },
+    "distance_bias": -0.0004792406231614829,
+    "distance_mae": 0.005052233043983506,
+    "distance_max_abs_error": 0.04569080471992493,
+    "distance_rmse": 0.007304012883875167,
+    "eikonal_abs_error_max": 0.9195724285865094,
+    "eikonal_abs_error_mean": 0.04604981667932364,
+    "false_collision_count": 183,
+    "false_collision_rate": 0.011518126888217522,
+    "false_safe_count": 286,
+    "false_safe_rate": 0.01775074478649454,
+    "free_points": 15888,
+    "gradient_cosine_mean": 0.9824015620315957,
+    "gradient_l2_error_mean": 0.10337274289171222,
+    "near_surface_band": 0.1,
+    "near_surface_mae": 0.004146170113420825,
+    "near_surface_max_abs_error": 0.03116448223590851,
+    "near_surface_max_overestimation": 0.03116448223590851,
+    "near_surface_points": 34897,
+    "recommended_conservative_margin": 0.03116448223590851,
+    "sign_accuracy": 0.98534375,
+    "validation_points": 48000,
+    "z_gradient_abs_mean": 0.08153278520303624
+  }
+}
