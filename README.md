@@ -150,13 +150,44 @@ random obstacle fields, and controller seeds:
 uv run python examples/random_benchmark.py --robot unicycle --algo brmppi
 uv run python examples/random_benchmark.py --robot unicycle --algo brmppi --nsdf
 ```
-
 Use `--no-tuned-config` for the older generic benchmark defaults. NSDF output files
 include `neural_sdf_tuned` in their names and record the selected checkpoint and
 full tuned configuration. Single-integrator and mobile-arm NSDF benchmarks remain
 unavailable until matching geometry checkpoints are trained. The completed 100-trial
 analytic/NSDF comparison and optimization history are recorded in
 [`docs/nsdf_benchmark_results.md`](docs/nsdf_benchmark_results.md).
+
+## Hero Scenario Evaluation
+
+The "hero scenario" pipeline evaluates all methods on deterministic, challenging obstacle configurations. It is designed to produce paper-quality comparison figures and videos.
+
+### Run Hero Scenarios
+
+Run a specific scenario (e.g., `narrow_passage`) for all algorithms and save a summary figure and comparison video:
+
+```bash
+uv run python br-mppi/examples/hero_benchmark.py --scenario narrow_passage --save-figure --save-video --headless
+```
+
+Available scenarios:
+- `narrow_passage`: A tight gap between two large obstacles.
+- `slalom`: Staggered obstacles requiring consecutive tight turns.
+- `local_trap`: A U-shaped trap testing early avoidance.
+- `dense_clutter`: A larger mixed-obstacle environment (uses `dynamic_unicycle`).
+
+### CLI Options
+
+- `--scenario`: Name of the scenario from `configs/hero_scenarios.yaml`.
+- `--algos`: List of algorithms to compare (default is all).
+- `--nsdf`: Enable pretrained neural SDF for `brmppi`.
+- `--save-figure`: Generate a summary PNG comparison in `output/hero/`.
+- `--save-video`: Generate a synchronized side-by-side MP4 comparison in `output/hero/`.
+- `--output-dir`: Override the default output directory.
+- `--steps`: Maximum simulation steps (default 600).
+
+The runner automatically loads the repo's committed tuned hyperparameters for every method.
+
+## SDF Notes
 
 The NSDF network weights, obstacle point clouds, and MLP queries use float32. Its
 barrier Jacobian is computed directly from the network's local gradient and chained

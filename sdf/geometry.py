@@ -57,10 +57,10 @@ class ObstacleField:
                 Circle(
                     np.asarray(obs.center, dtype=float),
                     obs.radius,
-                    facecolor="black",
-                    edgecolor="black",
-                    alpha=1.0,
-                    linewidth=1.0,
+                    facecolor="slategray",
+                    edgecolor="dimgray",
+                    alpha=0.6,
+                    linewidth=1.5,
                     zorder=8,
                 )
             )

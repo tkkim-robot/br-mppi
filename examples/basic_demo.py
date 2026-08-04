@@ -409,10 +409,12 @@ def draw_sampled_rollouts(ax, robot, sampled_rollouts: np.ndarray, best_rollout:
     if sampled_rollouts.size:
         for rollout in sampled_rollouts:
             positions = np.array([robot.position(state) for state in rollout])
-            ax.plot(positions[:, 0], positions[:, 1], color="tab:green", linewidth=0.8, alpha=0.2)
+            # Draw the cloud of rollouts in a soft turquoise color
+            ax.plot(positions[:, 0], positions[:, 1], color="mediumturquoise", linewidth=0.6, alpha=0.15, zorder=2)
     if best_rollout.size:
         positions = np.array([robot.position(state) for state in best_rollout])
-        ax.plot(positions[:, 0], positions[:, 1], color="tab:blue", linestyle="--", linewidth=1.2, alpha=0.65)
+        # Draw the single best rollout algorithm chose for this step
+        ax.plot(positions[:, 0], positions[:, 1], color="crimson", linestyle="--", linewidth=2.0, alpha=0.7, zorder=3)
 
 
 def rollouts_for_frame(

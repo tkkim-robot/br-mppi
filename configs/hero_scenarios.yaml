@@ -1,0 +1,313 @@
+# Hero Scenarios for BR-MPPI Evaluation
+# Each scenario defines a deterministic obstacle field, start state, and goal.
+# If start_state or goal are omitted, the robot's default_state and default_goal are used.
+
+narrow_passage:
+  robot: unicycle
+  description: "A narrow opening between two large obstacles."
+  start_state: [-7.0, 0.0, 0.0]
+  goal: [7.0, 0.0]
+  obstacles:
+    - {center: [0.0, 2.5], radius: 2.0}
+    - {center: [0.0, -2.5], radius: 2.0}
+
+slalom:
+  robot: unicycle
+  description: "A sequence of staggered obstacles requiring tight turns."
+  start_state: [-8.0, 0.0, 0.0]
+  goal: [8.0, 0.0]
+  obstacles:
+    - {center: [-4.0, 1.5], radius: 1.0}
+    - {center: [0.0, -1.5], radius: 1.0}
+    - {center: [4.0, 1.5], radius: 1.0}
+
+local_trap:
+  robot: unicycle
+  description: "A U-shaped trap that requires early avoidance to prevent getting stuck."
+  start_state: [-6.0, 0.0, 0.0]
+  goal: [6.0, 0.0]
+  obstacles:
+    - {center: [1.0, 1.5], radius: 0.8}
+    - {center: [1.0, -1.5], radius: 0.8}
+    - {center: [2.0, 0.0], radius: 0.8}
+    - {center: [0.0, 2.0], radius: 0.8}
+    - {center: [0.0, -2.0], radius: 0.8}
+
+dense_clutter:
+  robot: dynamic_unicycle
+  description: "A larger field of mixed-size obstacles."
+  start_state: [-8.0, 0.0, 0.0, 0.0]
+  goal: [8.0, 0.0]
+  obstacles:
+    - {center: [-5.0, 0.5], radius: 0.8}
+    - {center: [-3.0, -1.2], radius: 1.2}
+    - {center: [-1.0, 2.0], radius: 0.7}
+    - {center: [1.5, -0.5], radius: 1.5}
+    - {center: [4.0, 1.8], radius: 0.9}
+    - {center: [6.0, -1.0], radius: 1.1}
+
+mega_forest:
+  robot: dynamic_unicycle
+  description: "A massive, dense forest of 60 scattered obstacles resembling the benchmark plot."
+  start_state: [1.0, 5.0, 0.0, 0.0]
+  goal: [18.0, 5.0]
+  obstacles:
+    - {center: [11.95, 1.2], radius: 0.26}
+    - {center: [6.12, 6.89], radius: 0.42}
+    - {center: [15.49, 1.7], radius: 0.32}
+    - {center: [3.42, 2.75], radius: 0.35}
+    - {center: [3.37, 2.59], radius: 0.41}
+    - {center: [10.63, 2.76], radius: 0.39}
+    - {center: [14.33, 1.05], radius: 0.47}
+    - {center: [12.77, 3.72], radius: 0.21}
+    - {center: [16.4, 3.69], radius: 0.19}
+    - {center: [4.35, 7.78], radius: 0.39}
+    - {center: [14.3, 6.84], radius: 0.36}
+    - {center: [16.62, 4.03], radius: 0.37}
+    - {center: [14.61, 5.95], radius: 0.49}
+    - {center: [11.08, 6.64], radius: 0.17}
+    - {center: [6.19, 3.32], radius: 0.18}
+    - {center: [6.26, 1.81], radius: 0.26}
+    - {center: [11.9, 3.92], radius: 0.3}
+    - {center: [5.93, 3.14], radius: 0.52}
+    - {center: [12.07, 5.87], radius: 0.22}
+    - {center: [13.21, 2.31], radius: 0.3}
+    - {center: [16.85, 6.12], radius: 0.37}
+    - {center: [12.58, 7.74], radius: 0.46}
+    - {center: [6.21, 1.26], radius: 0.28}
+    - {center: [6.75, 2.69], radius: 0.53}
+    - {center: [15.27, 3.52], radius: 0.41}
+    - {center: [8.54, 8.32], radius: 0.33}
+    - {center: [6.71, 2.97], radius: 0.37}
+    - {center: [6.68, 5.68], radius: 0.51}
+    - {center: [8.59, 2.75], radius: 0.55}
+    - {center: [10.13, 1.73], radius: 0.17}
+    - {center: [4.54, 6.02], radius: 0.47}
+    - {center: [8.91, 1.51], radius: 0.3}
+    - {center: [16.95, 5.23], radius: 0.54}
+    - {center: [15.05, 1.09], radius: 0.44}
+    - {center: [12.54, 5.3], radius: 0.26}
+    - {center: [11.97, 1.89], radius: 0.32}
+    - {center: [9.35, 8.63], radius: 0.5}
+    - {center: [6.69, 5.0], radius: 0.22}
+    - {center: [15.78, 7.96], radius: 0.27}
+    - {center: [11.95, 5.87], radius: 0.21}
+    - {center: [13.68, 5.32], radius: 0.46}
+    - {center: [10.42, 1.0], radius: 0.28}
+    - {center: [3.27, 8.43], radius: 0.5}
+    - {center: [14.64, 3.46], radius: 0.17}
+    - {center: [15.29, 8.58], radius: 0.18}
+    - {center: [9.8, 1.55], radius: 0.45}
+    - {center: [13.72, 2.03], radius: 0.34}
+    - {center: [10.7, 3.12], radius: 0.5}
+    - {center: [8.92, 2.69], radius: 0.37}
+    - {center: [13.22, 2.61], radius: 0.27}
+    - {center: [16.93, 6.2], radius: 0.33}
+    - {center: [10.25, 1.97], radius: 0.24}
+    - {center: [7.73, 5.71], radius: 0.24}
+    - {center: [6.08, 1.57], radius: 0.4}
+    - {center: [6.21, 8.24], radius: 0.49}
+    - {center: [3.99, 2.9], radius: 0.42}
+    - {center: [6.0, 2.06], radius: 0.52}
+    - {center: [10.99, 4.78], radius: 0.46}
+    - {center: [14.3, 2.52], radius: 0.19}
+    - {center: [9.03, 4.39], radius: 0.34}
+
+dense_pebbles:
+  robot: dynamic_unicycle
+  description: "A highly complex field of 120 very small obstacles scattered like a minefield."
+  start_state: [1.0, 5.0, 0.0, 0.0]
+  goal: [18.0, 5.0]
+  obstacles:
+    - {center: [3.23, 1.28], radius: 0.14}
+    - {center: [4.01, 8.61], radius: 0.09}
+    - {center: [10.01, 3.49], radius: 0.2}
+    - {center: [4.74, 3.53], radius: 0.13}
+    - {center: [5.93, 0.52], radius: 0.14}
+    - {center: [3.73, 5.88], radius: 0.09}
+    - {center: [6.92, 4.53], radius: 0.21}
+    - {center: [3.8, 1.78], radius: 0.19}
+    - {center: [2.8, 8.7], radius: 0.16}
+    - {center: [6.21, 8.04], radius: 0.19}
+    - {center: [7.31, 7.71], radius: 0.11}
+    - {center: [11.02, 5.24], radius: 0.19}
+    - {center: [6.91, 4.08], radius: 0.19}
+    - {center: [9.68, 6.66], radius: 0.17}
+    - {center: [11.83, 8.51], radius: 0.15}
+    - {center: [11.86, 3.87], radius: 0.08}
+    - {center: [13.06, 2.13], radius: 0.19}
+    - {center: [15.29, 6.42], radius: 0.1}
+    - {center: [7.22, 4.02], radius: 0.09}
+    - {center: [8.89, 5.66], radius: 0.13}
+    - {center: [5.15, 1.29], radius: 0.17}
+    - {center: [2.68, 3.67], radius: 0.11}
+    - {center: [9.95, 7.01], radius: 0.21}
+    - {center: [11.44, 9.43], radius: 0.21}
+    - {center: [11.32, 2.6], radius: 0.15}
+    - {center: [4.99, 9.43], radius: 0.14}
+    - {center: [13.02, 0.9], radius: 0.1}
+    - {center: [5.2, 2.81], radius: 0.13}
+    - {center: [6.31, 4.41], radius: 0.14}
+    - {center: [4.02, 1.06], radius: 0.13}
+    - {center: [3.74, 4.4], radius: 0.08}
+    - {center: [10.0, 1.16], radius: 0.18}
+    - {center: [8.16, 9.37], radius: 0.12}
+    - {center: [9.12, 7.26], radius: 0.13}
+    - {center: [7.38, 6.25], radius: 0.22}
+    - {center: [14.87, 4.27], radius: 0.18}
+    - {center: [12.01, 3.85], radius: 0.11}
+    - {center: [3.6, 8.41], radius: 0.09}
+    - {center: [9.76, 5.34], radius: 0.1}
+    - {center: [11.68, 8.74], radius: 0.19}
+    - {center: [7.95, 1.64], radius: 0.22}
+    - {center: [9.74, 6.17], radius: 0.19}
+    - {center: [7.91, 1.06], radius: 0.1}
+    - {center: [11.86, 3.65], radius: 0.2}
+    - {center: [12.86, 9.32], radius: 0.17}
+    - {center: [6.75, 7.62], radius: 0.08}
+    - {center: [9.8, 8.34], radius: 0.15}
+    - {center: [4.42, 5.0], radius: 0.16}
+    - {center: [7.67, 8.54], radius: 0.13}
+    - {center: [6.3, 5.06], radius: 0.11}
+    - {center: [7.01, 4.08], radius: 0.21}
+    - {center: [3.63, 2.27], radius: 0.11}
+    - {center: [16.43, 8.52], radius: 0.11}
+    - {center: [10.4, 1.27], radius: 0.12}
+    - {center: [7.28, 5.34], radius: 0.21}
+    - {center: [13.83, 5.31], radius: 0.19}
+    - {center: [9.28, 7.08], radius: 0.19}
+    - {center: [6.1, 7.99], radius: 0.16}
+    - {center: [9.31, 4.06], radius: 0.11}
+    - {center: [9.52, 1.63], radius: 0.17}
+    - {center: [15.08, 7.61], radius: 0.17}
+    - {center: [9.42, 6.76], radius: 0.1}
+    - {center: [3.23, 8.25], radius: 0.13}
+    - {center: [11.87, 4.29], radius: 0.13}
+    - {center: [13.28, 3.59], radius: 0.19}
+    - {center: [13.99, 2.13], radius: 0.22}
+    - {center: [3.37, 4.23], radius: 0.15}
+    - {center: [14.11, 2.07], radius: 0.16}
+    - {center: [7.66, 8.8], radius: 0.1}
+    - {center: [6.22, 7.88], radius: 0.13}
+    - {center: [15.72, 0.96], radius: 0.13}
+    - {center: [4.0, 5.66], radius: 0.21}
+    - {center: [7.05, 6.32], radius: 0.12}
+    - {center: [8.65, 5.64], radius: 0.11}
+    - {center: [12.17, 5.01], radius: 0.21}
+    - {center: [6.35, 9.09], radius: 0.11}
+    - {center: [2.78, 6.44], radius: 0.18}
+    - {center: [9.18, 0.88], radius: 0.22}
+    - {center: [4.48, 8.33], radius: 0.2}
+    - {center: [5.59, 8.28], radius: 0.14}
+    - {center: [15.09, 8.49], radius: 0.19}
+    - {center: [6.54, 5.72], radius: 0.22}
+    - {center: [6.99, 3.98], radius: 0.18}
+    - {center: [3.38, 2.78], radius: 0.1}
+    - {center: [8.32, 4.32], radius: 0.16}
+    - {center: [9.46, 1.98], radius: 0.09}
+    - {center: [9.85, 7.37], radius: 0.21}
+    - {center: [14.25, 3.22], radius: 0.2}
+    - {center: [9.04, 3.04], radius: 0.09}
+    - {center: [8.7, 5.4], radius: 0.12}
+    - {center: [5.23, 8.97], radius: 0.09}
+    - {center: [15.65, 4.16], radius: 0.19}
+    - {center: [4.05, 5.63], radius: 0.19}
+    - {center: [8.6, 3.71], radius: 0.15}
+    - {center: [5.22, 2.4], radius: 0.11}
+    - {center: [3.03, 8.69], radius: 0.09}
+    - {center: [15.48, 0.6], radius: 0.17}
+    - {center: [10.16, 0.88], radius: 0.21}
+    - {center: [12.73, 8.41], radius: 0.14}
+    - {center: [6.58, 2.17], radius: 0.1}
+    - {center: [11.89, 7.9], radius: 0.11}
+    - {center: [2.86, 3.75], radius: 0.1}
+    - {center: [5.65, 2.5], radius: 0.17}
+    - {center: [8.58, 5.54], radius: 0.13}
+    - {center: [16.27, 4.97], radius: 0.09}
+    - {center: [4.45, 7.08], radius: 0.21}
+    - {center: [4.26, 4.64], radius: 0.2}
+    - {center: [10.23, 0.66], radius: 0.15}
+    - {center: [6.54, 2.42], radius: 0.21}
+    - {center: [3.98, 7.97], radius: 0.19}
+    - {center: [10.8, 3.42], radius: 0.09}
+    - {center: [11.86, 9.13], radius: 0.11}
+    - {center: [4.27, 4.78], radius: 0.2}
+    - {center: [2.57, 7.6], radius: 0.09}
+    - {center: [2.95, 1.82], radius: 0.14}
+    - {center: [15.62, 6.45], radius: 0.09}
+    - {center: [4.62, 4.65], radius: 0.09}
+    - {center: [11.86, 3.73], radius: 0.21}
+    - {center: [13.98, 7.85], radius: 0.11}
+    - {center: [8.54, 6.54], radius: 0.09}
+
+winding_corridor:
+  robot: dynamic_unicycle
+  description: "A dense field with a mathematically guaranteed S-curve safe corridor."
+  start_state: [1.0, 5.0, 0.0, 0.0]
+  goal: [18.0, 5.0]
+  obstacles:
+    - {center: [8.06, 2.3], radius: 0.35}
+    - {center: [16.08, 4.9], radius: 0.43}
+    - {center: [7.61, 3.99], radius: 0.5}
+    - {center: [7.08, 9.02], radius: 0.46}
+    - {center: [13.62, 4.72], radius: 0.42}
+    - {center: [6.04, 0.57], radius: 0.36}
+    - {center: [15.5, 5.95], radius: 0.59}
+    - {center: [7.36, 2.44], radius: 0.58}
+    - {center: [16.74, 9.0], radius: 0.5}
+    - {center: [2.56, 0.71], radius: 0.44}
+    - {center: [3.29, 3.29], radius: 0.3}
+    - {center: [6.95, 5.21], radius: 0.36}
+    - {center: [5.86, 4.14], radius: 0.53}
+    - {center: [13.21, 5.97], radius: 0.42}
+    - {center: [3.45, 1.79], radius: 0.35}
+    - {center: [4.66, 1.81], radius: 0.36}
+    - {center: [10.41, 7.44], radius: 0.54}
+    - {center: [4.79, 1.15], radius: 0.39}
+    - {center: [10.79, 0.93], radius: 0.36}
+    - {center: [8.21, 3.84], radius: 0.33}
+    - {center: [15.19, 8.81], radius: 0.52}
+    - {center: [7.98, 4.5], radius: 0.39}
+    - {center: [11.82, 6.38], radius: 0.39}
+    - {center: [15.11, 6.99], radius: 0.37}
+    - {center: [14.14, 6.57], radius: 0.37}
+    - {center: [8.57, 9.17], radius: 0.38}
+    - {center: [9.55, 8.66], radius: 0.56}
+    - {center: [13.82, 5.3], radius: 0.58}
+    - {center: [11.87, 6.0], radius: 0.38}
+    - {center: [12.17, 5.94], radius: 0.6}
+    - {center: [12.0, 4.46], radius: 0.41}
+    - {center: [12.42, 9.18], radius: 0.36}
+    - {center: [11.86, 7.19], radius: 0.56}
+    - {center: [8.0, 1.51], radius: 0.46}
+    - {center: [2.02, 3.29], radius: 0.5}
+    - {center: [8.66, 2.35], radius: 0.52}
+    - {center: [13.08, 4.71], radius: 0.46}
+    - {center: [11.3, 6.19], radius: 0.53}
+    - {center: [3.58, 3.27], radius: 0.47}
+    - {center: [10.36, 9.03], radius: 0.48}
+    - {center: [13.9, 4.09], radius: 0.35}
+    - {center: [8.91, 1.66], radius: 0.34}
+    - {center: [8.7, 8.15], radius: 0.51}
+    - {center: [8.27, 9.09], radius: 0.35}
+    - {center: [5.75, 2.96], radius: 0.47}
+    - {center: [15.34, 4.79], radius: 0.35}
+    - {center: [3.12, 2.66], radius: 0.44}
+    - {center: [2.23, 3.47], radius: 0.45}
+    - {center: [8.21, 1.99], radius: 0.48}
+    - {center: [2.71, 0.83], radius: 0.4}
+    - {center: [6.13, 3.79], radius: 0.47}
+    - {center: [4.97, 5.53], radius: 0.51}
+    - {center: [11.79, 7.84], radius: 0.32}
+    - {center: [12.17, 7.02], radius: 0.55}
+    - {center: [4.25, 1.28], radius: 0.53}
+    - {center: [12.75, 6.03], radius: 0.53}
+    - {center: [4.69, 1.5], radius: 0.45}
+    - {center: [16.5, 7.08], radius: 0.3}
+    - {center: [13.89, 8.37], radius: 0.32}
+    - {center: [14.26, 8.38], radius: 0.55}
+    - {center: [13.61, 3.86], radius: 0.39}
+    - {center: [2.68, 4.07], radius: 0.39}
+    - {center: [8.41, 1.15], radius: 0.41}
+    - {center: [14.21, 5.99], radius: 0.46}
+    - {center: [12.4, 0.67], radius: 0.56}
