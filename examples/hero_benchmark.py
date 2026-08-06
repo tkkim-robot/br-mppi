@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 import sys
 import time
@@ -28,6 +28,7 @@ from examples.basic_demo import axis_bounds, draw_frame, rollouts_for_frame, dra
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run hero scenario evaluation and visualization.")
     parser.add_argument("--scenario", type=str, default="narrow_passage", help="Scenario name from hero_scenarios.yaml.")
+    parser.add_argument("--robot-type", type=str, default=None, help="Override the robot dynamics (e.g., dynamic_unicycle, planar_quadrotor, mobile_arm).")
     parser.add_argument("--algos", nargs="+", default=ALGORITHMS, help="List of algorithms to evaluate.")
     parser.add_argument("--nsdf", action="store_true", help="Use pretrained NSDF for brmppi.")
     parser.add_argument("--steps", type=int, default=600, help="Max simulation steps.")
@@ -45,9 +46,19 @@ def run_hero_trial(
     nsdf: bool,
     max_steps: int,
     seed: int,
+    robot_type: str | None = None,
 ) -> tuple[TrialResult, dict]:
     scenario = get_hero_scenario(scenario_name)
-    robot = create_robot(scenario.robot_name)
+    
+    if robot_type is not None and robot_type != scenario.robot_name:
+        robot = create_robot(robot_type)
+        new_start = jnp.zeros(robot.state_dim)
+        if scenario.start_state is not None:
+            copy_len = min(len(scenario.start_state), robot.state_dim)
+            new_start = new_start.at[:copy_len].set(scenario.start_state[:copy_len])
+        scenario = replace(scenario, robot_name=robot_type, start_state=new_start)
+    else:
+        robot = create_robot(scenario.robot_name)
     
     # Load tuned config
     try:
@@ -338,31 +349,34 @@ def main():
     
     for algo in args.algos:
         print(f"Evaluating {algo}...")
-        res, data = run_hero_trial(args.scenario, algo, args.nsdf, args.steps, args.seed)
+        res, data = run_hero_trial(args.scenario, algo, args.nsdf, args.steps, args.seed, robot_type=args.robot_type)
         all_results.append(res)
         all_data.append(data)
         print(f"  Result: {'Reached' if res.reached else 'Collision' if res.collision else 'Timeout'} in {res.steps} steps. Min clearance: {res.min_exact_clearance:.3f}")
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     
+    # Determine the robot type used (either from args or scenario default)
+    actual_robot = args.robot_type if args.robot_type else all_data[0]["scenario"].robot_name
+    
     # Generate a unique timestamp for this run
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     
     # Save JSON results
-    json_path = args.output_dir / f"{args.scenario}_results_{timestamp}.json"
+    json_path = args.output_dir / f"{args.scenario}_{actual_robot}_results_{timestamp}.json"
     with open(json_path, "w") as f:
         json.dump([asdict(r) for r in all_results], f, indent=2)
     print(f"Results saved to {json_path}")
 
     # Save Figure
     if args.save_figure:
-        fig_path = args.output_dir / f"{args.scenario}_comparison_{timestamp}.png"
+        fig_path = args.output_dir / f"{args.scenario}_{actual_robot}_comparison_{timestamp}.png"
         plot_hero_comparison(fig_path, all_results, all_data, args.algos)
         print(f"Figure saved to {fig_path}")
         
     # Save Video
     if args.save_video:
-        video_path = args.output_dir / f"{args.scenario}_comparison_{timestamp}.mp4"
+        video_path = args.output_dir / f"{args.scenario}_{actual_robot}_comparison_{timestamp}.mp4"
         save_hero_video(video_path, all_results, all_data, args.algos)
         print(f"Video saved to {video_path}")
 
