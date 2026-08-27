@@ -139,6 +139,37 @@ This prints executed, sampled-rollout, and best-rollout clearance metrics for th
 
 The demo uses robot-specific default horizons so the BR-MPPI sample cloud visibly branches around obstacles. The single-integrator and dynamic-unicycle cases use 20-step rollout horizons, while unicycle and planar-quadrotor cases use 36-step rollout horizons by default. The mobile-arm default uses a 28-step horizon because its sampled footprint is much heavier to evaluate. All demos default to a 500-step maximum simulation cap and stop early on goal success. You can still override these with `--horizon`, `--samples`, `--steps`, and `--plot-samples`.
 
+## Five-Method Visual Comparison
+
+`test_compare_vis.py` runs one synchronized comparison using the committed tuned
+configuration for each method. It intentionally includes only BR-MPPI, MPPI-CBF,
+Shield-MPPI, SC-MPPI, and GS-MPPI; plain MPPI and penalty MPPI are not part of
+this visualization. Select one of the five dynamics with a single flag:
+
+```bash
+uv run python test_compare_vis.py --dynamics unicycle
+uv run python test_compare_vis.py --dynamics dynamic_unicycle
+uv run python test_compare_vis.py --dynamics planar_quadrotor
+uv run python test_compare_vis.py --dynamics single_integrator
+uv run python test_compare_vis.py --dynamics mobile_arm
+```
+
+The GUI is the default. The four finalized non-mobile scenes reproduce the
+obstacle layouts in the visual-comparison screenshots; the mobile-arm layout is
+provisional. Twenty-four sampled rollouts are shown by default without changing
+the tuned control parameters. Controller warm-up is excluded from the reported
+per-command timing.
+
+Save a synchronized video or final frame without opening a GUI:
+
+```bash
+uv run python test_compare_vis.py --dynamics unicycle --save-video --headless
+uv run python test_compare_vis.py --dynamics unicycle --save-figure --headless
+```
+
+Default outputs are written under `output/compare_vis/`. Pass an explicit path
+after `--save-video` or `--save-figure` to override it.
+
 ## Tuned Analytic/NSDF Benchmark
 
 For a single BR-MPPI method, `random_benchmark.py` loads the repository's tuned
