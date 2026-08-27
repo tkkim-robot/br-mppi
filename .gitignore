@@ -18,7 +18,6 @@ wandb/
 Videos/
 *.mp4
 *.gif
-*.png
 
 # Upstream reference checkout is intentionally local-only. This repo vendors
 # the small pretrained SDF checkpoints it needs under sdf/trained_models/.

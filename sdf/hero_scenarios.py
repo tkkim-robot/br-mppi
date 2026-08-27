@@ -10,7 +10,7 @@ import yaml
 from sdf.geometry import CircleObstacle, ObstacleField
 
 
-HERO_CONFIG_PATH = Path(__file__).resolve().parents[1] / "configs" / "hero_scenarios.yaml"
+HERO_CONFIG_PATH = Path(__file__).resolve().parents[1] / "configs" / "hero_scenarios_v2.yaml"
 
 
 @dataclass(frozen=True)

@@ -1540,7 +1540,7 @@ planar_quadrotor_scenario:
     radius: 3.0
 mobile_arm_scenario:
   robot: mobile_arm
-  description: Narrow gap forcing arm retraction.
+  description: V3 Random Through 17400
   start_state:
   - 2.0
   - 5.0
@@ -1558,21 +1558,45 @@ mobile_arm_scenario:
   - 5.0
   obstacles:
   - center:
-    - 8.0
-    - 7.0
-    radius: 1.2
+    - 4.482164067231302
+    - 1.956846012216834
+    radius: 0.5282405227638471
   - center:
-    - 8.0
-    - 3.0
-    radius: 1.2
+    - 11.482239872360095
+    - 1.5177710609999606
+    radius: 0.44487310440370037
   - center:
-    - 12.0
-    - 4.0
-    radius: 0.4
+    - 13.556928458279856
+    - 4.938722864624772
+    radius: 0.532004524432445
   - center:
-    - 12.0
-    - 6.0
-    radius: 0.4
+    - 5.656713375073586
+    - 8.108561778701947
+    radius: 0.42032739572490296
+  - center:
+    - 8.954223108655606
+    - 1.1917269933535102
+    radius: 0.5182267881809396
+  - center:
+    - 6.728090176530241
+    - 0.31953426854007483
+    radius: 0.40092061219410463
+  - center:
+    - 12.78297404845222
+    - 0.4913419546352893
+    radius: 0.48691761959441077
+  - center:
+    - 12.646354738406178
+    - 0.3815618864006687
+    radius: 0.45998717668887434
+  - center:
+    - 8.492387556654343
+    - 1.322364780335018
+    radius: 0.580464251892028
+  - center:
+    - 6.026355520530289
+    - 6.839346479500569
+    radius: 0.5204999462393963
 single_integrator_hero:
   robot: single_integrator
   description: A dense, chaotic asteroid belt for the 2D point mass.
@@ -1783,6 +1807,66 @@ single_integrator_hero:
     - 12.49
     - 2.61
     radius: 0.42
+  - center:
+    - 15.94
+    - 6.2
+    radius: 0.48
+  - center:
+    - 9.73
+    - 1.97
+    radius: 0.39
+  - center:
+    - 7.4
+    - 5.71
+    radius: 0.39
+  - center:
+    - 5.86
+    - 1.57
+    radius: 0.55
+  - center:
+    - 5.98
+    - 8.24
+    radius: 0.64
+  - center:
+    - 3.92
+    - 2.9
+    radius: 0.57
+  - center:
+    - 5.79
+    - 2.06
+    radius: 0.67
+  - center:
+    - 10.42
+    - 4.78
+    radius: 0.61
+  - center:
+    - 13.5
+    - 2.52
+    radius: 0.34
+  - center:
+    - 8.6
+    - 4.39
+    radius: 0.49
+  - center:
+    - 12.48
+    - 6.39
+    radius: 0.69
+  - center:
+    - 4.28
+    - 4.22
+    radius: 0.44
+  - center:
+    - 14.2
+    - 2.99
+    radius: 0.38
+  - center:
+    - 8.83
+    - 4.38
+    radius: 0.41
+  - center:
+    - 6.25
+    - 8.39
+    radius: 0.48
 unicycle_hero:
   robot: unicycle
   description: A dense urban slalom requiring aggressive steering.
@@ -1935,46 +2019,6 @@ unicycle_hero:
     - 11.51
     - 6.38
     radius: 0.52
-  - center:
-    - 14.36
-    - 6.99
-    radius: 0.49
-  - center:
-    - 13.52
-    - 6.57
-    radius: 0.5
-  - center:
-    - 6.85
-    - 7.26
-    radius: 0.43
-  - center:
-    - 8.69
-    - 9.17
-    radius: 0.5
-  - center:
-    - 9.54
-    - 8.66
-    radius: 0.75
-  - center:
-    - 13.25
-    - 5.3
-    radius: 0.77
-  - center:
-    - 6.34
-    - 8.43
-    radius: 0.56
-  - center:
-    - 11.56
-    - 6.0
-    radius: 0.51
-  - center:
-    - 11.82
-    - 5.94
-    radius: 0.79
-  - center:
-    - 11.67
-    - 4.46
-    radius: 0.55
 dynamic_unicycle_hero:
   robot: dynamic_unicycle
   description: A dense minefield for a high-speed inertial car.
@@ -2127,106 +2171,6 @@ dynamic_unicycle_hero:
     - 12.97
     - 5.81
     radius: 0.45
-  - center:
-    - 6.75
-    - 7.71
-    radius: 0.33
-  - center:
-    - 11.7
-    - 3.36
-    radius: 0.38
-  - center:
-    - 9.35
-    - 2.51
-    radius: 0.48
-  - center:
-    - 3.99
-    - 1.15
-    radius: 0.34
-  - center:
-    - 4.26
-    - 8.03
-    radius: 0.45
-  - center:
-    - 12.5
-    - 7.23
-    radius: 0.35
-  - center:
-    - 16.32
-    - 4.07
-    radius: 0.44
-  - center:
-    - 9.84
-    - 6.56
-    radius: 0.53
-  - center:
-    - 5.72
-    - 7.63
-    radius: 0.43
-  - center:
-    - 6.51
-    - 7.91
-    radius: 0.56
-  - center:
-    - 15.01
-    - 3.59
-    radius: 0.57
-  - center:
-    - 13.86
-    - 8.76
-    radius: 0.53
-  - center:
-    - 17.0
-    - 4.82
-    radius: 0.52
-  - center:
-    - 13.94
-    - 5.2
-    radius: 0.45
-  - center:
-    - 8.61
-    - 7.95
-    radius: 0.41
-  - center:
-    - 13.45
-    - 5.49
-    radius: 0.51
-  - center:
-    - 7.33
-    - 1.63
-    radius: 0.5
-  - center:
-    - 5.03
-    - 3.88
-    radius: 0.53
-  - center:
-    - 3.69
-    - 8.29
-    radius: 0.48
-  - center:
-    - 10.85
-    - 6.42
-    radius: 0.32
-  - center:
-    - 3.31
-    - 6.76
-    radius: 0.48
-  - center:
-    - 11.95
-    - 7.59
-    radius: 0.38
-  - center:
-    - 5.25
-    - 8.75
-    radius: 0.32
-  - center:
-    - 10.22
-    - 5.99
-    radius: 0.59
-  - center:
-    - 4.21
-    - 6.62
-    radius: 0.32
 planar_quadrotor_hero:
   robot: planar_quadrotor
   description: A jagged vertical cave for the 5D drone.
@@ -2372,146 +2316,6 @@ planar_quadrotor_hero:
     - 13.04
     - 7.82
     radius: 1.08
-  - center:
-    - 5.41
-    - 1.95
-    radius: 0.82
-  - center:
-    - 5.68
-    - 8.81
-    radius: 0.59
-  - center:
-    - 5.66
-    - 7.65
-    radius: 0.71
-  - center:
-    - 11.82
-    - 7.45
-    radius: 0.62
-  - center:
-    - 11.82
-    - 4.67
-    radius: 0.4
-  - center:
-    - 10.18
-    - 8.01
-    radius: 0.71
-  - center:
-    - 10.18
-    - 5.71
-    radius: 0.4
-  - center:
-    - 8.02
-    - -0.98
-    radius: 0.87
-  - center:
-    - 15.91
-    - 1.65
-    radius: 1.08
-  - center:
-    - 7.11
-    - 2.16
-    radius: 0.79
-  - center:
-    - 12.52
-    - 0.72
-    radius: 0.66
-  - center:
-    - 12.85
-    - 7.96
-    radius: 0.71
-  - center:
-    - 12.85
-    - 5.78
-    radius: 0.4
-  - center:
-    - 6.67
-    - 2.28
-    radius: 0.62
-  - center:
-    - 6.67
-    - 4.92
-    radius: 0.4
-  - center:
-    - 5.78
-    - 0.24
-    radius: 0.76
-  - center:
-    - 12.22
-    - -0.91
-    radius: 0.67
-  - center:
-    - 15.1
-    - 2.11
-    radius: 0.71
-  - center:
-    - 9.97
-    - 7.09
-    radius: 1.1
-  - center:
-    - 3.16
-    - 2.97
-    radius: 0.84
-  - center:
-    - 13.23
-    - 0.37
-    radius: 0.81
-  - center:
-    - 14.85
-    - 9.14
-    radius: 1.0
-  - center:
-    - 6.52
-    - 1.55
-    radius: 0.53
-  - center:
-    - 4.67
-    - 8.69
-    radius: 1.13
-  - center:
-    - 5.17
-    - 1.72
-    radius: 1.04
-  - center:
-    - 13.94
-    - 7.1
-    radius: 0.84
-  - center:
-    - 13.94
-    - 4.71
-    radius: 0.4
-  - center:
-    - 3.93
-    - -0.34
-    radius: 0.98
-  - center:
-    - 15.17
-    - -0.57
-    radius: 0.55
-  - center:
-    - 15.07
-    - 1.62
-    radius: 0.81
-  - center:
-    - 15.07
-    - 5.96
-    radius: 0.4
-  - center:
-    - 10.39
-    - 8.86
-    radius: 1.16
-  - center:
-    - 4.5
-    - 1.72
-    radius: 1.11
-  - center:
-    - 15.69
-    - 10.23
-    radius: 0.67
-  - center:
-    - 13.74
-    - 10.15
-    radius: 0.95
 si_hero_guaranteed:
   robot: single_integrator
   description: A dense hero environment with a guaranteed safe path for a 2D point

@@ -152,9 +152,10 @@ def run_hero_trial(
     mean_ms, p95_ms = timing_stats_ms(command_times)
     
     result = TrialResult(
-        trial=0, field_seed=0, robot=robot.name, algo=algo, obstacle_count=len(scenario.obstacle_field.obstacles),
+        trial=0, field_seed=0, controller_seed=seed, robot=robot.name, algo=algo, obstacle_count=len(scenario.obstacle_field.obstacles),
         reached=reached, collision=collision, timeout=not reached and not collision, steps=steps_run,
         final_error=final_error, min_exact_clearance=float(min_exact_clearance),
+        min_continuous_clearance=None,
         sampled_min_clearance=float(min_sampled_rollout_clearance),
         best_rollout_min_clearance=float(min_best_rollout_clearance),
         first_sample_collision_step=first_sample_collision_step,
@@ -184,20 +185,24 @@ def plot_hero_comparison(
 ):
     num_algos = len(algos)
     
+    # Calculate rows needed for smaller plots
+    num_small = num_algos - 1
+    num_rows = max(2, (num_small + 1) // 2)
+    
     # Create asymmetrical layout
-    fig = plt.figure(figsize=(20, 10))
-    grid = fig.add_gridspec(3, 5, wspace=0.3, hspace=0.4)
+    fig = plt.figure(figsize=(24, 12))
+    grid = fig.add_gridspec(num_rows, 6, wspace=0.3, hspace=0.4)
     
     axes = []
     
-    # 1. Main BR-MPPI plot (index 0)
-    main_ax = fig.add_subplot(grid[:, :3])
+    # 1. Main BR-MPPI plot (index 0) - spanning 4 columns
+    main_ax = fig.add_subplot(grid[:, :4])
     axes.append(main_ax)
     
     # 2. Smaller plots
     for i in range(1, num_algos):
         row = (i - 1) // 2
-        col = 3 + ((i - 1) % 2)
+        col = 4 + ((i - 1) % 2)
         small_ax = fig.add_subplot(grid[row, col])
         axes.append(small_ax)
         
@@ -218,22 +223,24 @@ def plot_hero_comparison(
         draw_sampled_rollouts(ax, robot, sampled, best)
         
         positions = np.array([robot.position(s) for s in trajectory])
-        ax.plot(positions[:, 0], positions[:, 1], color="crimson", linewidth=3.5, alpha=0.8, zorder=7)
-        ax.scatter([positions[0, 0]], [positions[0, 1]], color="mediumseagreen", s=60, zorder=9)
-        ax.scatter([goal[0]], [goal[1]], marker="*", color="gold", edgecolor="darkgoldenrod", s=200, zorder=9)
+        # Professional colors
+        ax.plot(positions[:, 0], positions[:, 1], color="#d62828", linewidth=3.5, alpha=0.8, zorder=7)
+        ax.scatter([positions[0, 0]], [positions[0, 1]], color="#2a9d8f", edgecolor="white", s=80, zorder=9)
+        ax.scatter([goal[0]], [goal[1]], marker="*", color="#ffb703", edgecolor="#fb8500", s=250, zorder=9)
         
-        robot.draw(ax, trajectory[-1], color="dodgerblue", edgecolor="midnightblue", zorder=10)
+        robot.draw(ax, trajectory[-1], color="#457b9d", edgecolor="#1d3557", zorder=10)
         
-        status = "Success" if res.reached else ("Collision" if res.collision else "Timeout")
+        status = "Success!" if res.reached else ("Collision!" if res.collision else "Timeout!")
         
+        robot_title = " ".join([word.capitalize() for word in robot.name.split("_")])
         if i == 0:
-            ax.set_title(f"{algo.upper()}\n{status} ({res.steps} steps)", fontsize=28, fontweight='bold', pad=15)
+            ax.set_title(f"{robot_title} | {algo.upper()}\n{status}", fontsize=28, fontweight='bold', pad=15)
         else:
-            ax.set_title(f"{algo.upper()}\n{status} ({res.steps} steps)", fontsize=14, fontweight='bold', pad=8)
-        
+            ax.set_title(f"{algo.upper()}\n{status}", fontsize=16, fontweight='bold', pad=8)
+            
         bounds = axis_bounds(field, robot, trajectory, goal)
         set_axes(ax, bounds)
-        ax.grid(True, alpha=0.1)
+        ax.grid(True, alpha=0.15, color='#495057', linestyle='--')
 
     # Hide unused axes
     for i in range(num_algos, len(axes)):
@@ -256,24 +263,26 @@ def save_hero_video(
     
     num_algos = len(algos)
     
+    # Calculate rows needed for smaller plots
+    num_small = num_algos - 1
+    num_rows = max(2, (num_small + 1) // 2)
+    
     # Create an asymmetrical grid layout to match the screenshot
-    # Left side: 1 huge plot spanning 3 rows and 3 columns
-    # Right side: 6 smaller plots in a 3x2 grid
-    fig = plt.figure(figsize=(20, 10))
-    grid = fig.add_gridspec(3, 5, wspace=0.3, hspace=0.4)
+    # Left side: 1 huge plot spanning all rows and 4 columns
+    # Right side: smaller plots in a grid
+    fig = plt.figure(figsize=(24, 12))
+    grid = fig.add_gridspec(num_rows, 6, wspace=0.3, hspace=0.4)
     
     axes = []
     
     # 1. Main BR-MPPI plot (Index 0 in algos list usually)
-    main_ax = fig.add_subplot(grid[:, :3])
+    main_ax = fig.add_subplot(grid[:, :4])
     axes.append(main_ax)
     
     # 2. Smaller plots for the other algorithms
-    # There are max 6 other algorithms (indices 1 through 6)
     for i in range(1, num_algos):
-        # Calculate grid position in the remaining 3x2 area
         row = (i - 1) // 2
-        col = 3 + ((i - 1) % 2)
+        col = 4 + ((i - 1) % 2)
         small_ax = fig.add_subplot(grid[row, col])
         axes.append(small_ax)
         
@@ -306,22 +315,31 @@ def save_hero_video(
                 draw_sampled_rollouts(ax, robot, sampled, best)
                 
                 positions = np.array([robot.position(s) for s in trajectory[:curr_idx + 1]])
-                ax.plot(positions[:, 0], positions[:, 1], color="crimson", linewidth=3.5, alpha=0.8, zorder=7)
-                ax.scatter([positions[0, 0]], [positions[0, 1]], color="mediumseagreen", s=60, zorder=9)
-                ax.scatter([goal[0]], [goal[1]], marker="*", color="gold", edgecolor="darkgoldenrod", s=200, zorder=9)
+                # Professional colors
+                ax.plot(positions[:, 0], positions[:, 1], color="#d62828", linewidth=3.5, alpha=0.8, zorder=7)
+                ax.scatter([positions[0, 0]], [positions[0, 1]], color="#2a9d8f", edgecolor="white", s=80, zorder=9)
+                ax.scatter([goal[0]], [goal[1]], marker="*", color="#ffb703", edgecolor="#fb8500", s=250, zorder=9)
                 
-                robot.draw(ax, trajectory[curr_idx], color="dodgerblue", edgecolor="midnightblue", zorder=10)
+                robot.draw(ax, trajectory[curr_idx], color="#457b9d", edgecolor="#1d3557", zorder=10)
                 
-                status = "Success" if (res.reached and curr_idx == len(trajectory)-1) else ("Collision" if (res.collision and curr_idx == len(trajectory)-1) else "")
+                # Check terminal condition for this frame
+                is_terminal_frame = (curr_idx == len(trajectory) - 1)
+                status = ""
+                if is_terminal_frame:
+                    status = "Success!" if res.reached else ("Collision!" if res.collision else "Timeout!")
+                
+                robot_title = " ".join([word.capitalize() for word in robot.name.split("_")])
+                
+                status_str = f"\n{status}" if status else "\n"
                 
                 if i == 0:
-                    ax.set_title(f"{algo.upper()} {status}", fontsize=28, fontweight='bold', pad=15)
+                    ax.set_title(f"{robot_title} | {algo.upper()}{status_str}", fontsize=28, fontweight='bold', pad=15)
                 else:
-                    ax.set_title(f"{algo.upper()} {status}", fontsize=14, fontweight='bold', pad=8)
-                
+                    ax.set_title(f"{algo.upper()}{status_str}", fontsize=16, fontweight='bold', pad=8)
+                        
                 bounds = axis_bounds(field, robot, trajectory, goal)
                 set_axes(ax, bounds)
-                ax.grid(True, alpha=0.1)
+                ax.grid(True, alpha=0.15, color='#495057', linestyle='--')
 
             for i in range(num_algos, len(axes)):
                 axes[i].axis("off")
