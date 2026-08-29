@@ -73,6 +73,10 @@ ROBOT_LABELS = {
 DEFAULT_MAX_STEPS = 600
 DEFAULT_CONTROLLER_SEED = 7
 DEFAULT_PLOT_SAMPLES = 24
+MAIN_SAMPLE_LINEWIDTH = 1.35
+COMPARISON_SAMPLE_LINEWIDTH = 1.05
+MAIN_SAMPLE_ALPHA = 0.38
+COMPARISON_SAMPLE_ALPHA = 0.32
 
 
 @dataclass(frozen=True)
@@ -700,8 +704,10 @@ def _draw_panel(
     _draw_obstacles(ax, scenario)
 
     if run.sampled_rollouts:
-        sample_linewidth = 0.9 if is_main else 0.7
-        sample_alpha = 0.30 if is_main else 0.24
+        sample_linewidth = (
+            MAIN_SAMPLE_LINEWIDTH if is_main else COMPARISON_SAMPLE_LINEWIDTH
+        )
+        sample_alpha = MAIN_SAMPLE_ALPHA if is_main else COMPARISON_SAMPLE_ALPHA
         for rollout in run.sampled_rollouts[rollout_index]:
             ax.plot(
                 rollout[:, 0],
