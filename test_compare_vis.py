@@ -1,8 +1,7 @@
 """Compare five tuned MPPI-family methods in fixed, difficult environments.
 
-The four finalized environments were extracted from Sean's visual-comparison
-branch and are intentionally embedded here so this remains a single runnable
-artifact. The mobile-arm environment is a temporary placeholder.
+The five finalized environments are intentionally embedded here so this
+remains a single runnable artifact.
 
 Examples
 --------
@@ -65,10 +64,16 @@ METHOD_LABELS = {
 }
 ROBOT_LABELS = {
     "single_integrator": "Single Integrator",
+    "single_integrator_dense": "Single Integrator — Dense Random Field",
     "unicycle": "Unicycle",
     "dynamic_unicycle": "Dynamic Unicycle",
     "planar_quadrotor": "Planar Quadrotor",
     "mobile_arm": "Mobile Arm",
+    "mobile_arm_dense": "Mobile Arm — Dense Random Field",
+}
+ROBOT_DYNAMICS = {
+    "mobile_arm_dense": "mobile_arm",
+    "single_integrator_dense": "single_integrator",
 }
 DEFAULT_MAX_STEPS = 600
 DEFAULT_CONTROLLER_SEED = 7
@@ -155,20 +160,160 @@ SCENARIOS: dict[str, ScenarioSpec] = {
             0.2617993877991494,
             0.2617993877991494,
         ),
-        goal=(16.0, 5.0),
+        goal=(22.0, 5.0),
         obstacles=(
-            (4.0, 10.0, 1.3),
-            (8.0, 9.5, 1.3),
-            (12.0, 10.0, 1.3),
-            (15.0, 9.5, 1.0),
-            (4.0, 0.0, 1.3),
-            (8.0, 0.5, 1.3),
-            (12.0, 0.0, 1.3),
-            (15.0, 0.5, 1.0),
-            (6.5, 8.0, 0.45),
-            (10.5, 2.0, 0.45),
+            # Irregular peripheral obstacles expand the scene without forming
+            # artificial rows; the inner gates still challenge both arms.
+            (-1.50, 12.00, 0.70),
+            (2.80, 11.10, 0.45),
+            (5.70, 13.20, 0.75),
+            (8.90, 10.80, 0.60),
+            (12.70, 12.40, 0.50),
+            (16.40, 10.50, 0.80),
+            (19.10, 13.50, 0.55),
+            (23.70, 11.70, 0.70),
+            (25.80, 8.90, 0.45),
+            (-1.00, -1.80, 0.60),
+            (3.60, -2.40, 0.75),
+            (6.80, 0.20, 0.50),
+            (9.50, -1.40, 0.65),
+            (13.20, -2.20, 0.55),
+            (16.80, 0.30, 0.70),
+            (20.30, -1.70, 0.45),
+            (23.80, 0.40, 0.65),
+            (26.20, -2.50, 0.80),
+            (6.0, 7.05, 0.54),
+            (8.0, 2.95, 0.56),
+            (10.0, 6.90, 0.58),
+            (12.0, 3.10, 0.54),
+            (14.0, 7.05, 0.56),
+            (16.0, 2.95, 0.58),
+            (18.0, 6.90, 0.54),
+            (20.0, 3.10, 0.56),
+            (5.0, 7.85, 0.32),
+            (9.0, 2.15, 0.34),
+            (13.0, 7.85, 0.34),
+            (17.0, 2.15, 0.32),
+            (6.90, 6.60, 0.28),
         ),
-        provisional=True,
+    ),
+    "mobile_arm_dense": ScenarioSpec(
+        start_state=(
+            2.0,
+            5.0,
+            0.0,
+            2.0420352248333655,
+            -0.5235987755982988,
+            -0.2617993877991494,
+            -0.2617993877991494,
+            1.0995574287564276,
+            0.5235987755982988,
+            0.2617993877991494,
+            0.2617993877991494,
+        ),
+        goal=(26.0, 5.0),
+        obstacles=(
+            # Fixed random-style field: dense enough to resemble the other
+            # hero environments while remaining reproducible across methods.
+            (-1.50, -3.00, 0.70),
+            (4.10, 11.80, 0.58),
+            (5.75, 9.65, 0.72),
+            (7.10, 13.15, 0.48),
+            (8.35, 10.75, 0.64),
+            (6.40, 5.15, 0.72),
+            (11.65, 9.10, 0.70),
+            (13.25, 13.55, 0.55),
+            (9.20, 5.65, 0.68),
+            (16.55, 12.10, 0.68),
+            (12.10, 4.55, 0.75),
+            (20.10, 13.05, 0.62),
+            (15.20, 5.55, 0.72),
+            (18.40, 4.45, 0.78),
+            (21.70, 5.60, 0.70),
+            (3.85, -1.65, 0.66),
+            (5.40, 1.15, 0.48),
+            (7.25, -2.45, 0.74),
+            (8.80, 2.35, 0.52),
+            (10.55, -0.55, 0.60),
+            (12.10, 1.45, 0.43),
+            (13.75, -2.05, 0.68),
+            (15.30, 2.20, 0.50),
+            (17.05, -0.70, 0.56),
+            (18.70, 1.30, 0.72),
+            (20.45, -2.30, 0.46),
+            (22.30, 2.15, 0.64),
+            (24.20, -0.45, 0.54),
+            (27.00, 1.10, 0.70),
+            (5.20, 7.65, 0.34),
+            (6.55, 3.45, 0.46),
+            (8.15, 6.85, 0.52),
+            (9.70, 3.10, 0.38),
+            (11.30, 7.35, 0.45),
+            (12.85, 4.05, 0.50),
+            (14.45, 6.65, 0.36),
+            (16.05, 3.35, 0.48),
+            (17.65, 7.20, 0.54),
+            (19.30, 3.75, 0.40),
+            (20.85, 6.55, 0.48),
+            (22.55, 3.30, 0.44),
+            (24.05, 7.10, 0.38),
+        ),
+    ),
+    "single_integrator_dense": ScenarioSpec(
+        start_state=(2.0, 5.0),
+        goal=(22.0, 5.0),
+        obstacles=(
+            # Seed-83 fixed random field. Keeping the sampled coordinates in
+            # source makes every controller see exactly the same environment.
+            (8.81, -2.29, 0.56),
+            (8.65, 2.48, 0.39),
+            (18.75, 3.51, 0.44),
+            (13.67, 4.84, 0.53),
+            (15.39, 3.39, 0.51),
+            (10.70, 6.82, 0.67),
+            (12.79, 12.35, 0.62),
+            (6.02, 3.85, 0.29),
+            (7.85, 4.43, 0.42),
+            (15.57, 5.60, 0.39),
+            (12.36, 9.21, 0.62),
+            (5.71, 10.58, 0.30),
+            (4.19, 7.64, 0.29),
+            (6.60, 10.27, 0.69),
+            (15.89, 7.95, 0.53),
+            (8.51, 0.83, 0.37),
+            (18.50, -1.24, 0.44),
+            (12.37, 5.97, 0.59),
+            (11.18, 6.12, 0.64),
+            (9.54, 12.22, 0.61),
+            (6.09, 7.40, 0.38),
+            (13.23, -2.44, 0.44),
+            (19.61, 12.04, 0.36),
+            (15.92, 2.44, 0.34),
+            (7.64, 8.07, 0.37),
+            (7.86, -3.00, 0.33),
+            (9.33, 7.67, 0.71),
+            (12.47, 0.29, 0.64),
+            (3.44, 6.93, 0.32),
+            (19.74, 12.55, 0.47),
+            (10.42, -2.53, 0.52),
+            (10.53, 11.84, 0.38),
+            (11.51, 0.75, 0.67),
+            (5.17, 0.80, 0.52),
+            (17.40, 8.47, 0.50),
+            (10.93, 2.31, 0.50),
+            (10.06, 2.56, 0.57),
+            (8.11, 1.42, 0.29),
+            (17.11, 11.20, 0.29),
+            (9.03, 10.64, 0.53),
+            (11.84, 2.65, 0.60),
+            (5.06, -2.20, 0.59),
+            (9.55, 11.40, 0.46),
+            (8.93, 0.41, 0.38),
+            (10.86, 0.08, 0.63),
+            (4.82, 11.65, 0.29),
+            (16.12, -0.79, 0.41),
+            (16.88, -0.20, 0.53),
+        ),
     ),
     "planar_quadrotor": ScenarioSpec(
         start_state=(2.0, 5.0, 0.0, 0.0, 0.0),
@@ -422,9 +567,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def validate_scenario(dynamics: str, scenario: ScenarioSpec) -> None:
-    if dynamics not in ROBOT_REGISTRY:
+    robot_dynamics = ROBOT_DYNAMICS.get(dynamics, dynamics)
+    if robot_dynamics not in ROBOT_REGISTRY:
         raise ValueError(f"Unknown dynamics {dynamics!r}")
-    robot = create_robot(dynamics)
+    robot = create_robot(robot_dynamics)
     if len(scenario.start_state) != robot.state_dim:
         raise ValueError(
             f"{dynamics} scenario has {len(scenario.start_state)} state values; "
@@ -457,9 +603,10 @@ def run_method(
         raise ValueError(f"Unsupported comparison method {method!r}")
     scenario = SCENARIOS[dynamics]
     validate_scenario(dynamics, scenario)
-    robot = create_robot(dynamics)
+    robot_dynamics = ROBOT_DYNAMICS.get(dynamics, dynamics)
+    robot = create_robot(robot_dynamics)
     field = scenario.obstacle_field()
-    tuned_config = load_tuned_config(dynamics, method)
+    tuned_config = load_tuned_config(robot_dynamics, method)
     visual_config = replace(tuned_config, plot_samples=plot_samples)
     controller = MPPIController(
         robot,
@@ -698,7 +845,7 @@ def _draw_panel(
 ) -> None:
     ax.clear()
     scenario = SCENARIOS[dynamics]
-    robot = create_robot(dynamics)
+    robot = create_robot(ROBOT_DYNAMICS.get(dynamics, dynamics))
     state_index = min(frame_index, len(run.trajectory) - 1)
     rollout_index = min(state_index, max(0, len(run.best_rollouts) - 1))
     _draw_obstacles(ax, scenario)
