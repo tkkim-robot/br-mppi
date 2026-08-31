@@ -64,16 +64,10 @@ METHOD_LABELS = {
 }
 ROBOT_LABELS = {
     "single_integrator": "Single Integrator",
-    "single_integrator_dense": "Single Integrator — Dense Random Field",
     "unicycle": "Unicycle",
     "dynamic_unicycle": "Dynamic Unicycle",
     "planar_quadrotor": "Planar Quadrotor",
     "mobile_arm": "Mobile Arm",
-    "mobile_arm_dense": "Mobile Arm — Dense Random Field",
-}
-ROBOT_DYNAMICS = {
-    "mobile_arm_dense": "mobile_arm",
-    "single_integrator_dense": "single_integrator",
 }
 DEFAULT_MAX_STEPS = 600
 DEFAULT_CONTROLLER_SEED = 7
@@ -89,7 +83,7 @@ class ScenarioSpec:
     start_state: tuple[float, ...]
     goal: tuple[float, float]
     obstacles: tuple[tuple[float, float, float], ...]
-    provisional: bool = False
+    max_steps: int = DEFAULT_MAX_STEPS
 
     def obstacle_field(self) -> ObstacleField:
         return ObstacleField(
@@ -160,57 +154,6 @@ SCENARIOS: dict[str, ScenarioSpec] = {
             0.2617993877991494,
             0.2617993877991494,
         ),
-        goal=(22.0, 5.0),
-        obstacles=(
-            # Irregular peripheral obstacles expand the scene without forming
-            # artificial rows; the inner gates still challenge both arms.
-            (-1.50, 12.00, 0.70),
-            (2.80, 11.10, 0.45),
-            (5.70, 13.20, 0.75),
-            (8.90, 10.80, 0.60),
-            (12.70, 12.40, 0.50),
-            (16.40, 10.50, 0.80),
-            (19.10, 13.50, 0.55),
-            (23.70, 11.70, 0.70),
-            (25.80, 8.90, 0.45),
-            (-1.00, -1.80, 0.60),
-            (3.60, -2.40, 0.75),
-            (6.80, 0.20, 0.50),
-            (9.50, -1.40, 0.65),
-            (13.20, -2.20, 0.55),
-            (16.80, 0.30, 0.70),
-            (20.30, -1.70, 0.45),
-            (23.80, 0.40, 0.65),
-            (26.20, -2.50, 0.80),
-            (6.0, 7.05, 0.54),
-            (8.0, 2.95, 0.56),
-            (10.0, 6.90, 0.58),
-            (12.0, 3.10, 0.54),
-            (14.0, 7.05, 0.56),
-            (16.0, 2.95, 0.58),
-            (18.0, 6.90, 0.54),
-            (20.0, 3.10, 0.56),
-            (5.0, 7.85, 0.32),
-            (9.0, 2.15, 0.34),
-            (13.0, 7.85, 0.34),
-            (17.0, 2.15, 0.32),
-            (6.90, 6.60, 0.28),
-        ),
-    ),
-    "mobile_arm_dense": ScenarioSpec(
-        start_state=(
-            2.0,
-            5.0,
-            0.0,
-            2.0420352248333655,
-            -0.5235987755982988,
-            -0.2617993877991494,
-            -0.2617993877991494,
-            1.0995574287564276,
-            0.5235987755982988,
-            0.2617993877991494,
-            0.2617993877991494,
-        ),
         goal=(26.0, 5.0),
         obstacles=(
             # Fixed random-style field: dense enough to resemble the other
@@ -258,8 +201,9 @@ SCENARIOS: dict[str, ScenarioSpec] = {
             (22.55, 3.30, 0.44),
             (24.05, 7.10, 0.38),
         ),
+        max_steps=800,
     ),
-    "single_integrator_dense": ScenarioSpec(
+    "single_integrator": ScenarioSpec(
         start_state=(2.0, 5.0),
         goal=(22.0, 5.0),
         obstacles=(
@@ -351,77 +295,6 @@ SCENARIOS: dict[str, ScenarioSpec] = {
             (12.18, -0.43, 0.93),
         ),
     ),
-    "single_integrator": ScenarioSpec(
-        start_state=(2.0, 5.0),
-        goal=(16.0, 5.0),
-        obstacles=(
-            (12.25, 10.91, 0.76),
-            (5.97, 10.48, 0.62),
-            (14.31, 10.29, 0.33),
-            (8.28, 10.06, 0.38),
-            (11.39, 9.98, 0.41),
-            (12.86, 9.79, 0.32),
-            (8.94, 9.52, 0.48),
-            (14.27, 9.4, 0.64),
-            (10.66, 9.61, 0.7),
-            (5.51, 9.74, 0.44),
-            (4.49, 9.02, 0.56),
-            (13.21, 9.29, 0.3),
-            (12.19, 8.64, 0.78),
-            (9.64, 8.78, 0.65),
-            (5.61, 8.61, 0.63),
-            (11.37, 8.78, 0.31),
-            (6.38, 8.39, 0.38),
-            (13.58, 8.11, 0.66),
-            (10.65, 7.92, 0.7),
-            (4.52, 7.78, 0.29),
-            (3.68, 6.77, 0.56),
-            (11.81, 6.32, 0.7),
-            (5.13, 6.29, 0.71),
-            (13.78, 6.34, 0.56),
-            (9.5, 6.23, 0.54),
-            (12.75, 5.92, 0.46),
-            (8.81, 5.84, 0.33),
-            (3.54, 5.63, 0.45),
-            (7.31, 5.34, 0.34),
-            (4.46, 5.26, 0.38),
-            (6.01, 4.97, 0.41),
-            (8.11, 4.89, 0.49),
-            (11.4, 5.0, 0.35),
-            (10.27, 4.54, 0.64),
-            (13.78, 4.69, 0.51),
-            (3.51, 3.96, 0.31),
-            (13.97, 3.86, 0.44),
-            (13.04, 3.4, 0.7),
-            (11.62, 3.53, 0.48),
-            (8.82, 3.09, 0.53),
-            (10.83, 3.09, 0.31),
-            (9.55, 2.82, 0.31),
-            (11.43, 2.61, 0.34),
-            (10.7, 2.38, 0.37),
-            (13.21, 2.42, 0.4),
-            (7.33, 1.85, 0.49),
-            (3.48, 1.84, 0.5),
-            (4.26, 1.73, 0.41),
-            (11.46, 1.51, 0.29),
-            (8.11, 1.44, 0.35),
-            (13.84, 1.42, 0.23),
-            (4.76, 1.18, 0.42),
-            (13.45, 0.85, 0.44),
-            (3.98, 1.18, 0.32),
-            (6.74, 0.87, 0.4),
-            (7.6, 0.62, 0.7),
-            (5.74, 0.48, 0.58),
-            (3.75, 0.35, 0.36),
-            (10.45, 0.49, 0.51),
-            (8.55, -0.24, 0.78),
-            (4.61, 0.2, 0.45),
-            (11.83, -0.06, 0.66),
-            (10.38, -0.44, 0.58),
-            (5.21, -0.58, 0.58),
-            (6.56, -0.92, 0.71),
-        ),
-    ),
     "unicycle": ScenarioSpec(
         start_state=(2.0, 5.0, 0.0),
         goal=(16.0, 5.0),
@@ -508,7 +381,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="unicycle",
         help="Robot dynamics and matching fixed obstacle configuration.",
     )
-    parser.add_argument("--max-steps", "--steps", type=int, default=DEFAULT_MAX_STEPS)
+    parser.add_argument(
+        "--max-steps",
+        "--steps",
+        type=int,
+        default=None,
+        help=(
+            "Maximum simulation steps. By default, use the finalized limit for "
+            "the selected dynamics."
+        ),
+    )
     parser.add_argument(
         "--controller-seed",
         "--seed",
@@ -553,7 +435,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Do not open the interactive comparison window.",
     )
     args = parser.parse_args(argv)
-    if args.max_steps <= 0:
+    if args.max_steps is not None and args.max_steps <= 0:
         parser.error("--max-steps must be positive")
     if args.plot_samples <= 0:
         parser.error("--plot-samples must be positive for this visualization")
@@ -567,10 +449,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def validate_scenario(dynamics: str, scenario: ScenarioSpec) -> None:
-    robot_dynamics = ROBOT_DYNAMICS.get(dynamics, dynamics)
-    if robot_dynamics not in ROBOT_REGISTRY:
+    if dynamics not in ROBOT_REGISTRY:
         raise ValueError(f"Unknown dynamics {dynamics!r}")
-    robot = create_robot(robot_dynamics)
+    robot = create_robot(dynamics)
     if len(scenario.start_state) != robot.state_dim:
         raise ValueError(
             f"{dynamics} scenario has {len(scenario.start_state)} state values; "
@@ -580,6 +461,8 @@ def validate_scenario(dynamics: str, scenario: ScenarioSpec) -> None:
         raise ValueError(f"{dynamics} scenario goal must have two coordinates")
     if not scenario.obstacles:
         raise ValueError(f"{dynamics} scenario must contain obstacles")
+    if scenario.max_steps <= 0:
+        raise ValueError(f"{dynamics} scenario max_steps must be positive")
     for index, (x, y, radius) in enumerate(scenario.obstacles):
         if not np.isfinite((x, y, radius)).all() or radius <= 0.0:
             raise ValueError(f"Invalid obstacle {index} in {dynamics} scenario")
@@ -603,10 +486,9 @@ def run_method(
         raise ValueError(f"Unsupported comparison method {method!r}")
     scenario = SCENARIOS[dynamics]
     validate_scenario(dynamics, scenario)
-    robot_dynamics = ROBOT_DYNAMICS.get(dynamics, dynamics)
-    robot = create_robot(robot_dynamics)
+    robot = create_robot(dynamics)
     field = scenario.obstacle_field()
-    tuned_config = load_tuned_config(robot_dynamics, method)
+    tuned_config = load_tuned_config(dynamics, method)
     visual_config = replace(tuned_config, plot_samples=plot_samples)
     controller = MPPIController(
         robot,
@@ -746,10 +628,9 @@ def run_comparison(
     plot_samples: int,
 ) -> list[MethodRun]:
     scenario = SCENARIOS[dynamics]
-    qualifier = " (provisional mobile-arm layout)" if scenario.provisional else ""
     print(
         f"dynamics={dynamics} obstacles={len(scenario.obstacles)} "
-        f"controller_seed={controller_seed} plot_samples={plot_samples}{qualifier}"
+        f"controller_seed={controller_seed} plot_samples={plot_samples}"
     )
     runs = []
     for method in COMPARISON_METHODS:
@@ -845,7 +726,7 @@ def _draw_panel(
 ) -> None:
     ax.clear()
     scenario = SCENARIOS[dynamics]
-    robot = create_robot(ROBOT_DYNAMICS.get(dynamics, dynamics))
+    robot = create_robot(dynamics)
     state_index = min(frame_index, len(run.trajectory) - 1)
     rollout_index = min(state_index, max(0, len(run.best_rollouts) - 1))
     _draw_obstacles(ax, scenario)
@@ -1060,9 +941,12 @@ def _resolved_output_path(value: str | None, dynamics: str, suffix: str) -> Path
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     _configure_matplotlib(args.headless)
+    max_steps = (
+        SCENARIOS[args.dynamics].max_steps if args.max_steps is None else args.max_steps
+    )
     runs = run_comparison(
         args.dynamics,
-        max_steps=args.max_steps,
+        max_steps=max_steps,
         controller_seed=args.controller_seed,
         plot_samples=args.plot_samples,
     )

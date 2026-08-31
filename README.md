@@ -154,11 +154,12 @@ uv run python test_compare_vis.py --dynamics single_integrator
 uv run python test_compare_vis.py --dynamics mobile_arm
 ```
 
-The GUI is the default. The four finalized non-mobile scenes reproduce the
-obstacle layouts in the visual-comparison screenshots; the mobile-arm layout is
-provisional. Twenty-four sampled rollouts are shown by default without changing
+The GUI is the default. Each dynamics choice loads its finalized, fixed obstacle
+field, including the smooth dense single-integrator case and the dense mobile-arm
+case study. Twenty-four sampled rollouts are shown by default without changing
 the tuned control parameters. Controller warm-up is excluded from the reported
-per-command timing.
+per-command timing. The finalized mobile-arm scene uses an 800-step limit; the
+other scenes use 600 steps. Pass `--max-steps` to override a scene's default.
 
 Save a synchronized video or final frame without opening a GUI:
 
