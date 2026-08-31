@@ -7,11 +7,11 @@ Examples
 --------
 Open the interactive comparison GUI::
 
-    uv run python test_compare_vis.py --dynamics unicycle
+    uv run python tests/test_compare_vis.py --dynamics unicycle
 
 Save a synchronized MP4 without opening a window::
 
-    uv run python test_compare_vis.py --dynamics planar_quadrotor \
+    uv run python tests/test_compare_vis.py --dynamics planar_quadrotor \
         --save-video --headless
 """
 
@@ -33,8 +33,12 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from controller import MPPIController, load_tuned_config
-from examples.random_benchmark import (
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from controller import MPPIController, load_tuned_config  # noqa: E402
+from examples.random_benchmark import (  # noqa: E402
     DEFAULT_DEADLOCK_POSITION_TOLERANCE,
     DEFAULT_DEADLOCK_PROGRESS_TOLERANCE,
     DEFAULT_DEADLOCK_WINDOW,
@@ -44,8 +48,8 @@ from examples.random_benchmark import (
     reset_controller,
     timing_stats_ms,
 )
-from robots import ROBOT_REGISTRY, create_robot
-from sdf import CircleObstacle, ObstacleField
+from robots import ROBOT_REGISTRY, create_robot  # noqa: E402
+from sdf import CircleObstacle, ObstacleField  # noqa: E402
 
 
 COMPARISON_METHODS = (
