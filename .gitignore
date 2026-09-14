@@ -19,9 +19,15 @@ Videos/
 *.mp4
 *.gif
 *.png
+*.log
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
 
-# Upstream reference checkout is intentionally local-only. This repo vendors
-# the small pretrained SDF checkpoints it needs under sdf/trained_models/.
+# Local reference checkout
 mobile_arm/
 
 # Local/editor state

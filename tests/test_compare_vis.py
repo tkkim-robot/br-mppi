@@ -1,8 +1,5 @@
 """Compare five tuned MPPI-family methods in fixed, difficult environments.
 
-The five finalized environments are intentionally embedded here so this
-remains a single runnable artifact.
-
 Examples
 --------
 Open the interactive comparison GUI::
@@ -17,8 +14,7 @@ Save a synchronized MP4 without opening a window::
 
 from __future__ import annotations
 
-# The requested filename starts with ``test_`` but this is an executable demo,
-# not a pytest module.  Importing it is side-effect free either way.
+# Executable visualization; exclude it from pytest collection.
 __test__ = False
 
 import argparse
@@ -98,10 +94,7 @@ class ScenarioSpec:
         )
 
 
-# Sean's final extracted obstacle configurations. The dynamic-unicycle and
-# planar-quadrotor centers include his deliberate final corridor corrections;
-# the raw raster extraction deadlocks BR-MPPI at the same choke point across
-# controller seeds. Compact triples avoid the PR's duplicate YAML files.
+# Fixed obstacle fields, stored as (center_x, center_y, radius) triples.
 SCENARIOS: dict[str, ScenarioSpec] = {
     "dynamic_unicycle": ScenarioSpec(
         start_state=(2.0, 5.0, 0.0, 0.0),
@@ -374,7 +367,7 @@ class MethodRun:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Visualize BR-MPPI against four tuned safety baselines in Sean's "
+            "Visualize BR-MPPI against four tuned safety baselines in "
             "fixed difficult obstacle fields."
         )
     )
@@ -391,7 +384,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=None,
         help=(
-            "Maximum simulation steps. By default, use the finalized limit for "
+            "Maximum simulation steps. By default, use the scenario limit for "
             "the selected dynamics."
         ),
     )
@@ -400,7 +393,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--seed",
         type=int,
         default=DEFAULT_CONTROLLER_SEED,
-        help="MPPI sampling seed (default: finalized benchmark seed 7).",
+        help="MPPI sampling seed (default: 7).",
     )
     parser.add_argument(
         "--plot-samples",

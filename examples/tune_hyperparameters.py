@@ -9,8 +9,7 @@ import sys
 import time
 from typing import Any
 
-# Hyperparameter tuning is intended for the overnight GPU machine. Request the
-# CUDA backend before importing the controller stack, which imports JAX.
+# Select CUDA before importing the controller stack, which imports JAX.
 os.environ.setdefault("JAX_PLATFORMS", "cuda")
 
 import numpy as np

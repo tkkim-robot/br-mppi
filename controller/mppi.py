@@ -201,9 +201,7 @@ class MPPIController:
             else jnp.array([], dtype=float)
         )
         if self.algo == "brmppi" and self.sdf_model is not None:
-            # BR-MPPI does not use the CBF-QP residual. Re-evaluating the neural
-            # barriers and Jacobian here, outside the compiled rollout, was a
-            # sizeable neural-only diagnostic cost on every command.
+            # BR-MPPI does not use the CBF-QP residual, so skip its neural evaluation.
             constraint_residual = None
         else:
             constraint_residual = self._cbf_constraint_residual_jax(
