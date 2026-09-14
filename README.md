@@ -11,10 +11,9 @@ This repository implements Barrier-Rate guided Model Predictive Path Integral co
 
 ## Installation
 
-Install [uv](https://docs.astral.sh/uv/), clone the repository, and create the environment:
+Install [uv](https://docs.astral.sh/uv/) and create the environment:
 
 ```bash
-git clone https://github.com/tkkim-robot/br-mppi.git
 cd br-mppi
 uv sync --extra dev
 ```
